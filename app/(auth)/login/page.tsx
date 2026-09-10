@@ -28,7 +28,7 @@ export default async function LoginPage() {
         <div className="login-hero-content">
           <span className="eyebrow eyebrow-light">
             <Icon name="sparkles" size={15} />
-            Tu equipo, siempre en tiempo
+            Tu equipo, siempre a tiempo
           </span>
           <h1 id="login-hero-title">
             La asistencia de tu equipo,

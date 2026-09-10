@@ -15,6 +15,8 @@ const seedRecords: AttendanceRecord[] = [
     checkIn: "07:54",
     checkOut: null,
     status: "present",
+    checkInPhoto: null,
+    checkOutPhoto: null,
   },
   {
     id: "att-002",
@@ -27,6 +29,8 @@ const seedRecords: AttendanceRecord[] = [
     checkIn: "08:03",
     checkOut: null,
     status: "present",
+    checkInPhoto: null,
+    checkOutPhoto: null,
   },
   {
     id: "att-003",
@@ -39,6 +43,8 @@ const seedRecords: AttendanceRecord[] = [
     checkIn: "08:24",
     checkOut: null,
     status: "late",
+    checkInPhoto: null,
+    checkOutPhoto: null,
   },
   {
     id: "att-004",
@@ -51,6 +57,8 @@ const seedRecords: AttendanceRecord[] = [
     checkIn: "07:58",
     checkOut: null,
     status: "present",
+    checkInPhoto: null,
+    checkOutPhoto: null,
   },
   {
     id: "att-005",
@@ -63,6 +71,8 @@ const seedRecords: AttendanceRecord[] = [
     checkIn: null,
     checkOut: null,
     status: "absent",
+    checkInPhoto: null,
+    checkOutPhoto: null,
   },
 ];
 

@@ -38,7 +38,7 @@ export function DashboardView({ data, userName }: { data: DashboardData; userNam
       <header className="page-heading heading-with-date">
         <div>
           <span className="eyebrow">RESUMEN GENERAL</span>
-          <h1>Buenos días, {firstName} <span aria-hidden="true">👋</span></h1>
+          <h1>Hola de nuevo, {firstName} <span aria-hidden="true">👋</span></h1>
           <p>Aquí tienes un vistazo de lo que ocurre hoy en tu equipo.</p>
         </div>
         <span className="date-chip"><Icon name="calendar" size={17} />{data.formattedDate}</span>

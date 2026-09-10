@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useEffect, useMemo, useState } from "react";
 
 import type {
@@ -10,6 +11,7 @@ import type {
 } from "@/features/attendance/types";
 import { Avatar } from "@/features/shared/components/avatar";
 import { Icon } from "@/features/shared/components/icon";
+import { CameraCapture } from "./camera-capture"; 
 
 const statusLabel = {
   present: "A tiempo",
@@ -34,6 +36,11 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
   const [records, setRecords] = useState(initialData.records);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [checkInPhoto, setCheckInPhoto] = useState<string | null>(null);
+  const [checkOutPhoto, setCheckOutPhoto] = useState<string | null>(null);
+  const [attendanceInfo, setAttendanceInfo] = useState<{date: string; time: string;} | null>(null);
+
+
 
   useEffect(() => {
     const updateClock = () => setClock(formatClock(new Date()));
@@ -43,6 +50,7 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
   }, []);
 
   const action: AttendanceAction = currentRecord?.checkIn && !currentRecord.checkOut ? "check-out" : "check-in";
+  const requiresPhoto = action === "check-in" ? !checkInPhoto : !checkOutPhoto;
   const isComplete = Boolean(currentRecord?.checkIn && currentRecord.checkOut);
   const summary = useMemo(() => {
     const newlyCheckedIn = currentRecord?.checkIn && !initialData.currentUserRecord?.checkIn;
@@ -59,13 +67,52 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
   async function register() {
     if (isComplete) return;
     setIsSaving(true);
+
+    if(requiresPhoto){
+
+      setNotice({
+        type:"error",
+        text:
+        action === "check-in"
+        ? "Debe capturar una fotografía antes de registrar la entrada."
+        : "Debe capturar una fotografía antes de registrar la salida."
+      });
+
+      return;
+    }
+    
     setNotice(null);
+    const now = new Date();
+
+    const date = now.toLocaleDateString("es-GT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+
+    const time = now.toLocaleTimeString("es-GT", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+
+    setAttendanceInfo({
+      date,
+      time,
+    });
 
     try {
       const response = await fetch("/api/v1/attendance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({
+        action,
+        photo:
+        action === "check-in"
+        ? checkInPhoto
+        : checkOutPhoto
+        })
       });
       const result = (await response.json()) as AttendanceMutationResponse;
 
@@ -75,11 +122,20 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
       }
 
       setCurrentRecord(result.record);
+      if(action === "check-in"){
+      setCheckInPhoto(null);
+      }else{
+      setCheckOutPhoto(null);
+      }
       setRecords((current) => {
         const withoutCurrent = current.filter((item) => item.employeeId !== result.record!.employeeId);
         return [result.record!, ...withoutCurrent];
       });
-      setNotice({ type: "success", text: result.message ?? "Asistencia registrada." });
+      setNotice({ type: "success",  text:
+        `Asistencia registrada correctamente.
+        Fecha: ${date}
+        Hora: ${time}
+        Fotografía capturada.` });
     } catch {
       setNotice({ type: "error", text: "No hay conexión con el servidor." });
     } finally {
@@ -122,9 +178,22 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
                 ? "Registra tu entrada con un solo toque."
                 : "Registra tu hora de salida para cerrar la jornada."}
           </p>
+          {!isComplete && requiresPhoto && (
+          <CameraCapture
+            onCapture={(image)=>{
+
+              if(action === "check-in"){
+                setCheckInPhoto(image);
+              }else{
+                setCheckOutPhoto(image);
+              }
+
+            }}
+          />
+          )}
           <button
             className="button button-primary checkin-button"
-            disabled={isSaving || isComplete}
+            disabled={isSaving || isComplete || requiresPhoto}
             onClick={register}
             type="button"
           >

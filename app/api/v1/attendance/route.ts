@@ -29,12 +29,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "El contenido debe enviarse como JSON." }, { status: 415 });
     }
 
-    const body = (await request.json()) as { action?: unknown };
+    const body = (await request.json()) as {
+      action?: unknown;
+      photo?: string | null;
+    };
     if (body.action !== "check-in" && body.action !== "check-out") {
       return NextResponse.json({ error: "La acción de asistencia no es válida." }, { status: 400 });
     }
 
-    return NextResponse.json(registerAttendance(user, body.action as AttendanceAction));
+    return NextResponse.json(
+      registerAttendance(
+        user,
+        body.action as AttendanceAction,
+        body.photo
+      )
+    );
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: 401 });

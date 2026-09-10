@@ -44,10 +44,17 @@ export function getAttendancePageData(userId: string): AttendancePageData {
   };
 }
 
-export function registerAttendance(user: SessionUser, action: AttendanceAction) {
+export function registerAttendance(user: SessionUser, action: AttendanceAction,photo?: string | null): { record: AttendanceRecord; message: string;}
+ {
   const dateKey = getDateKey();
   const existing = attendanceRepository.findByEmployee(user.id, dateKey);
   const time = getTime();
+
+  if (!photo) {
+  throw new AttendanceDomainError(
+    "Debe capturar una fotografía antes de registrar la asistencia."
+  );
+}
 
   if (action === "check-in") {
     if (existing?.checkIn) {
@@ -66,6 +73,9 @@ export function registerAttendance(user: SessionUser, action: AttendanceAction) 
       checkIn: time,
       checkOut: null,
       status: isLate ? "late" : "present",
+      checkInPhoto:  photo,
+      checkOutPhoto: null,
+      
     };
 
     return {
@@ -81,7 +91,7 @@ export function registerAttendance(user: SessionUser, action: AttendanceAction) 
     throw new AttendanceDomainError("Tu salida ya fue registrada hoy.");
   }
 
-  const updated = { ...existing, checkOut: time };
+  const updated = { ...existing, checkOut: time,checkOutPhoto: photo ?? null,};
   return {
     record: attendanceRepository.save(updated, dateKey),
     message: `Salida registrada a las ${time}.`,

@@ -11,7 +11,10 @@ export type AttendanceRecord = {
   schedule: string;
   checkIn: string | null;
   checkOut: string | null;
+  checkInPhoto: string | null;
+  checkOutPhoto: string | null;
   status: AttendanceStatus;
+  
 };
 
 export type AttendanceSummary = {
