@@ -1,123 +1,200 @@
 import "server-only";
 
 import type { AttendanceRecord } from "@/features/attendance/types";
-import { getDateKey } from "@/server/shared/date";
+import { supabase } from "@/server/supabase/client";
 
-const seedRecords: AttendanceRecord[] = [
-  {
-    id: "att-001",
-    employeeId: "usr-carlos",
-    employeeName: "Carlos Méndez",
-    initials: "CM",
-    avatarTone: "blue",
-    department: "Operaciones",
-    schedule: "08:00 – 17:00",
-    checkIn: "07:54",
-    checkOut: null,
-    status: "present",
-    checkInPhoto: null,
-    checkOutPhoto: null,
-  },
-  {
-    id: "att-002",
-    employeeId: "usr-sofia",
-    employeeName: "Sofía Ramírez",
-    initials: "SR",
-    avatarTone: "purple",
-    department: "Administración",
-    schedule: "08:00 – 17:00",
-    checkIn: "08:03",
-    checkOut: null,
-    status: "present",
-    checkInPhoto: null,
-    checkOutPhoto: null,
-  },
-  {
-    id: "att-003",
-    employeeId: "usr-diego",
-    employeeName: "Diego López",
-    initials: "DL",
-    avatarTone: "orange",
-    department: "Mantenimiento",
-    schedule: "08:00 – 17:00",
-    checkIn: "08:24",
-    checkOut: null,
-    status: "late",
-    checkInPhoto: null,
-    checkOutPhoto: null,
-  },
-  {
-    id: "att-004",
-    employeeId: "usr-valeria",
-    employeeName: "Valeria Castillo",
-    initials: "VC",
-    avatarTone: "pink",
-    department: "Recursos Humanos",
-    schedule: "08:00 – 17:00",
-    checkIn: "07:58",
-    checkOut: null,
-    status: "present",
-    checkInPhoto: null,
-    checkOutPhoto: null,
-  },
-  {
-    id: "att-005",
-    employeeId: "usr-marco",
-    employeeName: "Marco Estrada",
-    initials: "ME",
-    avatarTone: "green",
-    department: "Veterinaria",
-    schedule: "07:00 – 16:00",
-    checkIn: null,
-    checkOut: null,
-    status: "absent",
-    checkInPhoto: null,
-    checkOutPhoto: null,
-  },
-];
-
-type DemoStore = Map<string, AttendanceRecord[]>;
-
-const globalStore = globalThis as typeof globalThis & {
-  __zooAttendanceStore?: DemoStore;
+type AttendanceRow = {
+  id: string;
+  user_id: string;
+  shift_id: string;
+  date: string;
+  check_in: string | null;
+  check_out: string | null;
+  check_in_photo: string | null;
+  check_out_photo: string | null;
+  worked_minutes: number | null;
+  status: string;
+  observation: string | null;
 };
 
-function getStore() {
-  globalStore.__zooAttendanceStore ??= new Map();
-  return globalStore.__zooAttendanceStore;
-}
+type EmployeeShiftRow = {
+  shift_id: string;
+  start_date: string;
+  end_date: string | null;
+  active: boolean;
+  work_shifts: {
+    id: string;
+    name: string;
+    start_time: string;
+    end_time: string;
+  } | null;
+};
 
-function cloneRecords(records: AttendanceRecord[]) {
-  return records.map((record) => ({ ...record }));
-}
+function mapAttendanceRow(row: AttendanceRow): AttendanceRecord {
+  return {
+    id: row.id,
+    employeeId: row.user_id,
 
-function ensureDay(dateKey = getDateKey()) {
-  const store = getStore();
+    // Estos datos se completarán luego con users
+    employeeName: "",
+    initials: "",
+    avatarTone: "blue",
+    department: "",
 
-  if (!store.has(dateKey)) {
-    store.set(dateKey, cloneRecords(seedRecords));
-  }
+    schedule: "",
+    checkIn: row.check_in,
+    checkOut: row.check_out,
+    checkInPhoto: row.check_in_photo,
+    checkOutPhoto: row.check_out_photo,
 
-  return store.get(dateKey)!;
+    status: row.status as AttendanceRecord["status"],
+  };
 }
 
 export const attendanceRepository = {
-  listByDate(dateKey = getDateKey()) {
-    return cloneRecords(ensureDay(dateKey));
+  async listByDate(dateKey: string): Promise<AttendanceRecord[]> {
+    const { data, error } = await supabase
+      .from("attendance")
+      .select("*")
+      .eq("date", dateKey)
+      .order("check_in", { ascending: true });
+
+    if (error) {
+      throw new Error(
+        `Error al consultar asistencias: ${error.message}`
+      );
+    }
+
+    return ((data ?? []) as AttendanceRow[]).map(mapAttendanceRow);
   },
 
-  findByEmployee(employeeId: string, dateKey = getDateKey()) {
-    const record = ensureDay(dateKey).find((item) => item.employeeId === employeeId);
-    return record ? { ...record } : null;
+  async findByEmployee(
+    employeeId: string,
+    dateKey: string
+  ): Promise<AttendanceRecord | null> {
+    const { data, error } = await supabase
+      .from("attendance")
+      .select("*")
+      .eq("user_id", employeeId)
+      .eq("date", dateKey)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(
+        `Error al consultar la asistencia del empleado: ${error.message}`
+      );
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return mapAttendanceRow(data as AttendanceRow);
   },
 
-  save(record: AttendanceRecord, dateKey = getDateKey()) {
-    const records = ensureDay(dateKey);
-    const index = records.findIndex((item) => item.employeeId === record.employeeId);
+  async findActiveShiftByEmployee(
+    employeeId: string,
+    dateKey: string
+  ): Promise<EmployeeShiftRow | null> {
+    const { data, error } = await supabase
+      .from("employee_shifts")
+      .select(`
+        shift_id,
+        start_date,
+        end_date,
+        active,
+        work_shifts (
+          id,
+          name,
+          start_time,
+          end_time
+        )
+      `)
+      .eq("user_id", employeeId)
+      .eq("active", true)
+      .lte("start_date", dateKey)
+      .or(`end_date.is.null,end_date.gte.${dateKey}`)
+      .order("start_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (index >= 0) records[index] = { ...record };
-    else records.unshift({ ...record });
+    if (error) {
+      throw new Error(
+        `Error al consultar la jornada del empleado: ${error.message}`
+      );
+    }
 
-    return { ...record };
+    if (!data) {
+      return null;
+    }
+
+    const row = data as {
+      shift_id: string;
+      start_date: string;
+      end_date: string | null;
+      active: boolean;
+      work_shifts:
+        | {
+            id: string;
+            name: string;
+            start_time: string;
+            end_time: string;
+          }
+        | {
+            id: string;
+            name: string;
+            start_time: string;
+            end_time: string;
+          }[]
+        | null;
+    };
+
+    const workShift = Array.isArray(row.work_shifts)
+      ? row.work_shifts[0] ?? null
+      : row.work_shifts;
+
+    return {
+      shift_id: row.shift_id,
+      start_date: row.start_date,
+      end_date: row.end_date,
+      active: row.active,
+      work_shifts: workShift,
+    };
+  },
+
+  async save(
+    record: AttendanceRecord,
+    dateKey: string,
+    shiftId: string,
+    workedMinutes: number | null = null
+  ): Promise<AttendanceRecord> {
+    const payload = {
+      id: record.id,
+      user_id: record.employeeId,
+      shift_id: shiftId,
+      date: dateKey,
+      check_in: record.checkIn,
+      check_out: record.checkOut,
+      check_in_photo: record.checkInPhoto ?? null,
+      check_out_photo: record.checkOutPhoto ?? null,
+      worked_minutes: workedMinutes,
+      status: record.status,
+    };
+
+    const { data, error } = await supabase
+      .from("attendance")
+      .upsert(payload, {
+        onConflict: "user_id,date",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(
+        `Error al guardar la asistencia: ${error.message}`
+      );
+    }
+
+    return mapAttendanceRow(data as AttendanceRow);
   },
 };

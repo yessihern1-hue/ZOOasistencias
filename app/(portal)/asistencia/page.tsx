@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Tomar asistencia" };
 
 export default async function AttendancePage() {
   const user = await requireUser();
-  const data = getAttendancePageData(user.id);
+  const data = await getAttendancePageData(user.id);
 
   return <AttendanceView initialData={data} />;
 }

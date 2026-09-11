@@ -11,7 +11,7 @@ import { requireApiUser, UnauthorizedError } from "@/server/auth/dal";
 export async function GET() {
   try {
     const user = await requireApiUser();
-    return NextResponse.json(getAttendancePageData(user.id));
+    return NextResponse.json( await getAttendancePageData(user.id));
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: 401 });
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      registerAttendance(
+      await registerAttendance(
         user,
         body.action as AttendanceAction,
         body.photo

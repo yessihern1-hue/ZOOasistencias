@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Resumen" };
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const data = getDashboardData();
+  const data = await getDashboardData();
 
   return <DashboardView data={data} userName={user.name} />;
 }
