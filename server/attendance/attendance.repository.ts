@@ -1,7 +1,22 @@
 import "server-only";
 
 import type { AttendanceRecord } from "@/features/attendance/types";
-import { supabase } from "@/server/supabase/client";
+import { supabaseAdmin } from "@/server/supabase/admin";
+
+type UserRelation = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  employee_status: string;
+};
+
+type WorkShiftRelation = {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+};
 
 type AttendanceRow = {
   id: string;
@@ -15,6 +30,16 @@ type AttendanceRow = {
   worked_minutes: number | null;
   status: string;
   observation: string | null;
+
+  users:
+    | UserRelation
+    | UserRelation[]
+    | null;
+
+  work_shifts:
+    | WorkShiftRelation
+    | WorkShiftRelation[]
+    | null;
 };
 
 type EmployeeShiftRow = {
@@ -22,42 +47,108 @@ type EmployeeShiftRow = {
   start_date: string;
   end_date: string | null;
   active: boolean;
-  work_shifts: {
-    id: string;
-    name: string;
-    start_time: string;
-    end_time: string;
-  } | null;
+
+  work_shifts: WorkShiftRelation | null;
 };
 
-function mapAttendanceRow(row: AttendanceRow): AttendanceRecord {
+function getFirstRelation<T>(
+  relation: T | T[] | null
+): T | null {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
+function getInitials(name: string): string {
+  if (!name) {
+    return "";
+  }
+
+  return name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
+
+function formatSchedule(
+  startTime: string,
+  endTime: string
+): string {
+  return `${startTime.slice(0, 5)} – ${endTime.slice(0, 5)}`;
+}
+
+function mapAttendanceRow(
+  row: AttendanceRow
+): AttendanceRecord {
+  const user = getFirstRelation(row.users);
+  const shift = getFirstRelation(row.work_shifts);
+
+  const employeeName = user?.name ?? "";
+
   return {
     id: row.id,
     employeeId: row.user_id,
 
-    // Estos datos se completarán luego con users
-    employeeName: "",
-    initials: "",
+    employeeName,
+    initials: getInitials(employeeName),
     avatarTone: "blue",
-    department: "",
 
-    schedule: "",
+    schedule: shift
+      ? formatSchedule(
+          shift.start_time,
+          shift.end_time
+        )
+      : "",
+
     checkIn: row.check_in,
     checkOut: row.check_out,
+
     checkInPhoto: row.check_in_photo,
     checkOutPhoto: row.check_out_photo,
 
-    status: row.status as AttendanceRecord["status"],
+    status:
+      row.status as AttendanceRecord["status"],
   };
 }
 
+const attendanceSelect = `
+  *,
+  users (
+    id,
+    name,
+    email,
+    role,
+    employee_status
+  ),
+  work_shifts (
+    id,
+    name,
+    start_time,
+    end_time
+  )
+`;
+
 export const attendanceRepository = {
-  async listByDate(dateKey: string): Promise<AttendanceRecord[]> {
-    const { data, error } = await supabase
-      .from("attendance")
-      .select("*")
-      .eq("date", dateKey)
-      .order("check_in", { ascending: true });
+  async listByDate(
+    dateKey: string
+  ): Promise<AttendanceRecord[]> {
+    const { data, error } =
+      await supabaseAdmin
+        .from("attendance")
+        .select(attendanceSelect)
+        .eq("date", dateKey)
+        .order("check_in", {
+          ascending: true,
+        });
 
     if (error) {
       throw new Error(
@@ -65,19 +156,22 @@ export const attendanceRepository = {
       );
     }
 
-    return ((data ?? []) as AttendanceRow[]).map(mapAttendanceRow);
+    return ((data ?? []) as AttendanceRow[]).map(
+      mapAttendanceRow
+    );
   },
 
   async findByEmployee(
     employeeId: string,
     dateKey: string
   ): Promise<AttendanceRecord | null> {
-    const { data, error } = await supabase
-      .from("attendance")
-      .select("*")
-      .eq("user_id", employeeId)
-      .eq("date", dateKey)
-      .maybeSingle();
+    const { data, error } =
+      await supabaseAdmin
+        .from("attendance")
+        .select(attendanceSelect)
+        .eq("user_id", employeeId)
+        .eq("date", dateKey)
+        .maybeSingle();
 
     if (error) {
       throw new Error(
@@ -89,34 +183,41 @@ export const attendanceRepository = {
       return null;
     }
 
-    return mapAttendanceRow(data as AttendanceRow);
+    return mapAttendanceRow(
+      data as AttendanceRow
+    );
   },
 
   async findActiveShiftByEmployee(
     employeeId: string,
     dateKey: string
   ): Promise<EmployeeShiftRow | null> {
-    const { data, error } = await supabase
-      .from("employee_shifts")
-      .select(`
-        shift_id,
-        start_date,
-        end_date,
-        active,
-        work_shifts (
-          id,
-          name,
-          start_time,
-          end_time
+    const { data, error } =
+      await supabaseAdmin
+        .from("employee_shifts")
+        .select(`
+          shift_id,
+          start_date,
+          end_date,
+          active,
+          work_shifts (
+            id,
+            name,
+            start_time,
+            end_time
+          )
+        `)
+        .eq("user_id", employeeId)
+        .eq("active", true)
+        .lte("start_date", dateKey)
+        .or(
+          `end_date.is.null,end_date.gte.${dateKey}`
         )
-      `)
-      .eq("user_id", employeeId)
-      .eq("active", true)
-      .lte("start_date", dateKey)
-      .or(`end_date.is.null,end_date.gte.${dateKey}`)
-      .order("start_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+        .order("start_date", {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
 
     if (error) {
       throw new Error(
@@ -133,32 +234,21 @@ export const attendanceRepository = {
       start_date: string;
       end_date: string | null;
       active: boolean;
+
       work_shifts:
-        | {
-            id: string;
-            name: string;
-            start_time: string;
-            end_time: string;
-          }
-        | {
-            id: string;
-            name: string;
-            start_time: string;
-            end_time: string;
-          }[]
+        | WorkShiftRelation
+        | WorkShiftRelation[]
         | null;
     };
-
-    const workShift = Array.isArray(row.work_shifts)
-      ? row.work_shifts[0] ?? null
-      : row.work_shifts;
 
     return {
       shift_id: row.shift_id,
       start_date: row.start_date,
       end_date: row.end_date,
       active: row.active,
-      work_shifts: workShift,
+      work_shifts: getFirstRelation(
+        row.work_shifts
+      ),
     };
   },
 
@@ -173,21 +263,28 @@ export const attendanceRepository = {
       user_id: record.employeeId,
       shift_id: shiftId,
       date: dateKey,
+
       check_in: record.checkIn,
       check_out: record.checkOut,
-      check_in_photo: record.checkInPhoto ?? null,
-      check_out_photo: record.checkOutPhoto ?? null,
+
+      check_in_photo:
+        record.checkInPhoto ?? null,
+
+      check_out_photo:
+        record.checkOutPhoto ?? null,
+
       worked_minutes: workedMinutes,
       status: record.status,
     };
 
-    const { data, error } = await supabase
-      .from("attendance")
-      .upsert(payload, {
-        onConflict: "user_id,date",
-      })
-      .select()
-      .single();
+    const { data, error } =
+      await supabaseAdmin
+        .from("attendance")
+        .upsert(payload, {
+          onConflict: "user_id,date",
+        })
+        .select(attendanceSelect)
+        .single();
 
     if (error) {
       throw new Error(
@@ -195,6 +292,8 @@ export const attendanceRepository = {
       );
     }
 
-    return mapAttendanceRow(data as AttendanceRow);
+    return mapAttendanceRow(
+      data as AttendanceRow
+    );
   },
 };
