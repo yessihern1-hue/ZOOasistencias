@@ -1,14 +1,20 @@
 import "server-only";
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
-import { SESSION_COOKIE, verifySessionToken } from "./session";
+import { createSupabaseServerClient } from "@/server/supabase/client";
 
-export async function getCurrentUser() {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  return verifySessionToken(token);
-}
+import { mapSupabaseUser } from "./auth.service";
+
+export const getCurrentUser = cache(async () => {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) return null;
+
+  return mapSupabaseUser(data.user);
+});
 
 export async function requireUser() {
   const user = await getCurrentUser();

@@ -10,12 +10,8 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Abre [http://localhost:3000](http://localhost:3000) e inicia sesión con:
-
-```text
-Correo: admin@zoo.com
-Contraseña: demo123
-```
+Abre [http://localhost:3000](http://localhost:3000) e inicia sesión con un usuario
+creado en **Supabase Authentication → Users**.
 
 Para validar una entrega:
 
@@ -25,7 +21,19 @@ npm run build
 npm start
 ```
 
-`SESSION_SECRET` es obligatorio en producción. Genera uno seguro, por ejemplo con `openssl rand -base64 32`, y configúralo en las variables del proveedor donde despliegues la aplicación.
+La aplicación usa estas variables:
+
+| Variable | Uso |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase. |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clave pública `publishable` de Supabase. También se admite `NEXT_PUBLIC_SUPABASE_ANON_KEY` para proyectos anteriores. |
+
+Los valores de Supabase se encuentran en la configuración API del proyecto. Después de modificar `.env.local`, reinicia `npm run dev` para que Next.js cargue los cambios.
+
+El inicio de sesión usa Supabase Auth con correo y contraseña. El nombre visible
+se toma de `user_metadata.full_name` (o `user_metadata.name`). El rol se toma
+exclusivamente de `app_metadata.role` y admite `admin`, `supervisor` o
+`collaborator`; si no existe, se asigna `collaborator`.
 
 ## Arquitectura
 
@@ -53,10 +61,11 @@ features/
 └── shared/                     # Componentes visuales reutilizables
 
 server/
-├── auth/                       # Autenticación, firma de sesión y DAL
+├── auth/                       # Supabase Auth, usuario de sesión y DAL
 ├── attendance/                 # Servicio y repositorio de asistencia
 ├── dashboard/                  # Agregación de indicadores
 ├── employees/                  # Servicio y repositorio de colaboradores
+├── supabase/                   # Cliente SSR y renovación de sesión
 └── shared/                     # Utilidades exclusivas del servidor
 ```
 
@@ -66,17 +75,19 @@ server/
 2. Un componente interactivo en `features` llama a `/api/v1/*` cuando necesita mutar o refrescar información desde el navegador.
 3. El Route Handler vuelve a validar la sesión y el cuerpo de la solicitud.
 4. El servicio aplica las reglas del negocio y usa un repositorio.
-5. El repositorio actual puede reemplazarse por PostgreSQL, MySQL u otro proveedor sin reescribir las vistas.
+5. El repositorio consulta Supabase con la identidad del usuario para aplicar las políticas RLS.
 
 Las páginas del servidor no llaman a la API interna: consultan el servicio directamente para evitar un salto HTTP innecesario. Los endpoints siguen existiendo para los componentes del navegador y para integraciones futuras.
 
 ## Estado actual y siguiente paso para producción
 
-Esta entrega es un prototipo funcional. La asistencia se conserva en memoria mientras el servidor está activo y los colaboradores son datos semilla. Antes de usarla con datos reales se debe:
+Esta entrega es un prototipo funcional. La autenticación y la asistencia ya usan
+Supabase; los colaboradores y varios indicadores todavía son datos semilla. Antes
+de usarla con datos reales se debe:
 
-1. Conectar una base de datos y crear tablas para usuarios, colaboradores, horarios, asistencias y sesiones.
-2. Sustituir la cuenta demo por un proveedor de autenticación o contraseñas con hash seguro.
-3. Agregar roles y permisos detallados para administración, supervisión y colaboradores.
+1. Versionar el esquema y las migraciones de las tablas de perfiles, jornadas y asistencias.
+2. Definir políticas RLS para que cada colaborador solo acceda a los registros permitidos.
+3. Aplicar autorización por rol en las operaciones administrativas.
 4. Añadir pruebas automatizadas, auditoría de cambios y reglas para turnos nocturnos, vacaciones y días festivos.
 
 La separación `servicio → repositorio` ya deja preparado ese cambio: la interfaz no depende del almacenamiento de demostración.

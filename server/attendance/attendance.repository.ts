@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { AttendanceRecord } from "@/features/attendance/types";
-import { supabase } from "@/server/supabase/client";
+import { createSupabaseServerClient } from "@/server/supabase/client";
 
 type AttendanceRow = {
   id: string;
@@ -53,6 +53,7 @@ function mapAttendanceRow(row: AttendanceRow): AttendanceRecord {
 
 export const attendanceRepository = {
   async listByDate(dateKey: string): Promise<AttendanceRecord[]> {
+    const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
       .from("attendance")
       .select("*")
@@ -72,6 +73,7 @@ export const attendanceRepository = {
     employeeId: string,
     dateKey: string
   ): Promise<AttendanceRecord | null> {
+    const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
       .from("attendance")
       .select("*")
@@ -96,6 +98,7 @@ export const attendanceRepository = {
     employeeId: string,
     dateKey: string
   ): Promise<EmployeeShiftRow | null> {
+    const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
       .from("employee_shifts")
       .select(`
@@ -168,6 +171,7 @@ export const attendanceRepository = {
     shiftId: string,
     workedMinutes: number | null = null
   ): Promise<AttendanceRecord> {
+    const supabase = await createSupabaseServerClient();
     const payload = {
       id: record.id,
       user_id: record.employeeId,
