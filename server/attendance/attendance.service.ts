@@ -1,7 +1,5 @@
 import "server-only";
 
-import { randomUUID } from "crypto";
-
 import type { SessionUser } from "@/features/auth/types";
 import type {
   AttendanceAction,
@@ -9,16 +7,14 @@ import type {
   AttendanceRecord,
   AttendanceSummary,
 } from "@/features/attendance/types";
-
+import type { Employee } from "@/features/employees/types";
+import { employeeRepository } from "@/server/employees/employee.repository";
+import { formatLongDate, getDateKey } from "@/server/shared/date";
 import {
-  formatLongDate,
-  getDateKey,
-  getTime,
-} from "@/server/shared/date";
-
+  deleteAttendancePhoto,
+  uploadAttendancePhoto,
+} from "@/server/storage/attendance-photo.service";
 import { attendanceRepository } from "./attendance.repository";
-
-const LATE_TOLERANCE_MINUTES = 10;
 
 export class AttendanceDomainError extends Error {
   constructor(message: string) {
@@ -27,136 +23,127 @@ export class AttendanceDomainError extends Error {
   }
 }
 
-function timeToMinutes(time: string): number {
-  const [hours, minutes] = time.split(":").map(Number);
-
-  return hours * 60 + minutes;
-}
-
-function calculateWorkedMinutes(
-  checkIn: string,
-  checkOut: string
-): number {
-  const checkInMinutes = timeToMinutes(checkIn);
-  let checkOutMinutes = timeToMinutes(checkOut);
-
-  // Para jornadas que terminan después de medianoche
-  if (checkOutMinutes < checkInMinutes) {
-    checkOutMinutes += 24 * 60;
-  }
-
-  return Math.max(0, checkOutMinutes - checkInMinutes);
-}
-
-function isLateArrival(
-  checkInTime: string,
-  shiftStartTime: string
-): boolean {
-  const checkInMinutes = timeToMinutes(checkInTime);
-  const shiftStartMinutes = timeToMinutes(shiftStartTime);
-
-  return (
-    checkInMinutes >
-    shiftStartMinutes + LATE_TOLERANCE_MINUTES
-  );
-}
-
 function formatSchedule(
-  startTime: string,
-  endTime: string
+  startTime: string | null,
+  endTime: string | null,
+  fallback: string
 ): string {
+  if (!startTime || !endTime) return fallback;
   return `${startTime.slice(0, 5)} – ${endTime.slice(0, 5)}`;
 }
 
 function calculateSummary(
-  records: AttendanceRecord[]
+  records: AttendanceRecord[],
+  employees: Employee[]
 ): AttendanceSummary {
-  const present = records.filter(
-    (record) => record.status === "present"
-  ).length;
+  const activeEmployeeIds = new Set(
+    employees
+      .filter((employee) => employee.status === "active")
+      .map((employee) => employee.id)
+  );
+  const byEmployee = new Map<string, AttendanceRecord[]>();
 
-  const late = records.filter(
-    (record) => record.status === "late"
-  ).length;
+  for (const record of records) {
+    if (!activeEmployeeIds.has(record.employeeId)) continue;
+    const employeeRecords = byEmployee.get(record.employeeId) ?? [];
+    employeeRecords.push(record);
+    byEmployee.set(record.employeeId, employeeRecords);
+  }
 
-  const absent = records.filter(
-    (record) => record.status === "absent"
-  ).length;
+  let present = 0;
+  let late = 0;
+
+  for (const employeeRecords of byEmployee.values()) {
+    if (employeeRecords.some((record) => record.status === "late")) {
+      late += 1;
+    } else {
+      present += 1;
+    }
+  }
 
   return {
-    total: records.length,
+    total: activeEmployeeIds.size,
     present,
     late,
-    absent,
+    absent: Math.max(0, activeEmployeeIds.size - byEmployee.size),
   };
 }
 
+function getScheduleForDate(
+  dateKey: string,
+  shift: Awaited<ReturnType<typeof attendanceRepository.findActiveShiftByAuthUser>>
+): string | null {
+  if (!shift) return null;
+
+  const dayOfWeek = new Date(`${dateKey}T12:00:00Z`).getUTCDay();
+  const configuredDay = shift.workShift.work_shift_days?.find(
+    (day) => day.day_of_week === dayOfWeek
+  );
+
+  return formatSchedule(
+    configuredDay?.start_time ?? shift.workShift.start_time,
+    configuredDay?.end_time ?? shift.workShift.end_time,
+    shift.workShift.name
+  );
+}
+
+function extractDatabaseMessage(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : "";
+  const knownMessages = [
+    "El empleado no esta activo.",
+    "El empleado tiene vacaciones o permiso aprobado en este momento.",
+    "Ya existe una entrada abierta. Registra la salida primero.",
+    "Todavia no se puede registrar otra entrada.",
+    "No hay una jornada activa asignada.",
+    "La jornada no tiene horario configurado para hoy.",
+    "Se alcanzo el maximo de sesiones permitidas para hoy.",
+    "Todavia no se puede registrar entrada para esta jornada.",
+    "No hay una entrada abierta para cerrar.",
+  ];
+
+  return (
+    knownMessages.find((message) => rawMessage.includes(message)) ??
+    "No se pudo registrar la asistencia. Intenta nuevamente."
+  );
+}
+
 export async function getAttendancePageData(
-  userId: string
+  authUserId: string
 ): Promise<AttendancePageData> {
   const dateKey = getDateKey();
+  const [records, employeeShift, employees, registrationState] = await Promise.all([
+    attendanceRepository.listByDate(dateKey),
+    attendanceRepository.findActiveShiftByAuthUser(authUserId, dateKey),
+    employeeRepository.list(),
+    attendanceRepository.getMyRegistrationState(),
+  ]);
 
-  const records =
-    await attendanceRepository.listByDate(dateKey);
+  const currentUserSessions = records.filter(
+    (record) => record.authUserId === authUserId
+  );
+  const currentUserRecord =
+    currentUserSessions.find((record) => record.sessionStatus === "open") ??
+    currentUserSessions[0] ??
+    null;
 
   return {
     dateKey,
     formattedDate: formatLongDate(),
-
     records,
-
-    currentUserRecord:
-      records.find(
-        (record) => record.employeeId === userId
-      ) ?? null,
-
-    summary: calculateSummary(records),
+    currentUserRecord,
+    currentUserSessions,
+    currentUserSchedule: getScheduleForDate(dateKey, employeeShift),
+    summary: calculateSummary(records, employees),
+    registrationState,
   };
 }
 
 export async function registerAttendance(
   user: SessionUser,
   action: AttendanceAction,
-  photo?: string | null
-): Promise<{
-  record: AttendanceRecord;
-  message: string;
-}> {
-  const dateKey = getDateKey();
-  const time = getTime();
-
-  const existing =
-    await attendanceRepository.findByEmployee(
-      user.id,
-      dateKey
-    );
-
-  const employeeShift =
-    await attendanceRepository.findActiveShiftByEmployee(
-      user.id,
-      dateKey
-    );
-
-  if (!employeeShift) {
-    throw new AttendanceDomainError(
-      "No tienes una jornada de trabajo asignada."
-    );
-  }
-
-  if (!employeeShift.work_shifts) {
-    throw new AttendanceDomainError(
-      "La jornada asignada no tiene una configuración válida."
-    );
-  }
-
-  const shift = employeeShift.work_shifts;
-  const shiftId = employeeShift.shift_id;
-
-  const schedule = formatSchedule(
-    shift.start_time,
-    shift.end_time
-  );
-
+  photo?: string | null,
+  observation?: string | null
+): Promise<{ record: AttendanceRecord; data: AttendancePageData; message: string }> {
   if (!photo) {
     throw new AttendanceDomainError(
       action === "check-in"
@@ -165,115 +152,37 @@ export async function registerAttendance(
     );
   }
 
-  // =========================
-  // ENTRADA
-  // =========================
-  if (action === "check-in") {
-    if (existing?.checkIn) {
-      throw new AttendanceDomainError(
-        "Tu entrada ya fue registrada hoy."
-      );
-    }
-
-    const isLate = isLateArrival(
-      time,
-      shift.start_time
-    );
-
-    const record: AttendanceRecord = {
-      id: existing?.id ?? randomUUID(),
-
-      employeeId: user.id,
-      employeeName: user.name,
-      initials: user.initials,
-
-      avatarTone: "blue",
-      department: "—",
-
-      schedule,
-
-      checkIn: time,
-      checkOut: null,
-
-      checkInPhoto: photo,
-      checkOutPhoto: null,
-
-      status: isLate ? "late" : "present",
-    };
-
-    const savedRecord =
-      await attendanceRepository.save(
-        record,
-        dateKey,
-        shiftId,
-        null
-      );
-
-    return {
-      record: {
-        ...savedRecord,
-        employeeName: user.name,
-        initials: user.initials,
-        avatarTone: "blue",
-        department: "—",
-        schedule,
-      },
-
-      message: `Entrada registrada a las ${time}.`,
-    };
-  }
-
-  // =========================
-  // SALIDA
-  // =========================
-  if (!existing?.checkIn) {
-    throw new AttendanceDomainError(
-      "Primero debes registrar tu entrada."
-    );
-  }
-
-  if (existing.checkOut) {
-    throw new AttendanceDomainError(
-      "Tu salida ya fue registrada hoy."
-    );
-  }
-
-  const workedMinutes = calculateWorkedMinutes(
-    existing.checkIn,
-    time
+  const photoPath = await uploadAttendancePhoto(
+    user.id,
+    getDateKey(),
+    action,
+    photo
   );
 
-  const updated: AttendanceRecord = {
-    ...existing,
+  let record: AttendanceRecord;
 
-    employeeName: user.name,
-    initials: user.initials,
-    avatarTone: "blue",
-    department: "—",
-    schedule,
+  try {
+    record =
+      action === "check-in"
+        ? await attendanceRepository.clockIn(photoPath, observation ?? null)
+        : await attendanceRepository.clockOut(photoPath, observation ?? null);
+  } catch (error) {
+    try {
+      await deleteAttendancePhoto(photoPath);
+    } catch (cleanupError) {
+      console.error("No se pudo limpiar una fotografía huérfana:", cleanupError);
+    }
 
-    checkOut: time,
-    checkOutPhoto: photo,
-  };
+    throw new AttendanceDomainError(extractDatabaseMessage(error));
+  }
 
-  const savedRecord =
-    await attendanceRepository.save(
-      updated,
-      dateKey,
-      shiftId,
-      workedMinutes
-    );
+  const registeredTime =
+    action === "check-in" ? record.checkIn : record.checkOut;
+  const data = await getAttendancePageData(user.id);
 
   return {
-    record: {
-      ...savedRecord,
-      employeeName: user.name,
-      initials: user.initials,
-      avatarTone: "blue",
-      department: "—",
-      schedule,
-    },
-
-    message: `Salida registrada a las ${time}.`,
+    record,
+    data,
+    message: `${action === "check-in" ? "Entrada" : "Salida"} registrada a las ${registeredTime ?? "hora del servidor"}.`,
   };
 }

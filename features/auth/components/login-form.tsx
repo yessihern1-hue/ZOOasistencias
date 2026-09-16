@@ -4,6 +4,7 @@ import { type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { LoginResponse } from "@/features/auth/types";
+import { getUserEntryPath } from "@/features/auth/navigation";
 import { Icon } from "@/features/shared/components/icon";
 
 export function LoginForm() {
@@ -35,7 +36,12 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/dashboard");
+      if (!result.user) {
+        setError("No se recibió el perfil del usuario.");
+        return;
+      }
+
+      router.push(getUserEntryPath(result.user));
       router.refresh();
     } catch {
       setError("No hay conexión con el servidor. Intenta de nuevo.");
@@ -45,7 +51,7 @@ export function LoginForm() {
   }
 
   return (
-    <form className="login-form" onSubmit={handleSubmit}>
+    <form className="login-form" method="post" onSubmit={handleSubmit}>
       <label className="field-label" htmlFor="email">
         Correo electrónico
       </label>
@@ -53,7 +59,7 @@ export function LoginForm() {
         <span className="field-leading" aria-hidden="true">@</span>
         <input
           autoComplete="email"
-          defaultValue="admin@zoo.com"
+          autoFocus
           id="email"
           name="email"
           placeholder="nombre@empresa.com"
@@ -62,19 +68,13 @@ export function LoginForm() {
         />
       </div>
 
-      <div className="field-label-row">
-        <label className="field-label" htmlFor="password">
-          Contraseña
-        </label>
-        <button className="text-button" type="button">
-          ¿La olvidaste?
-        </button>
-      </div>
+      <label className="field-label" htmlFor="password">
+        Contraseña
+      </label>
       <div className="field-control">
         <span className="field-leading field-lock" aria-hidden="true">⌑</span>
         <input
           autoComplete="current-password"
-          defaultValue="demo123"
           id="password"
           minLength={6}
           name="password"
@@ -105,7 +105,7 @@ export function LoginForm() {
 
       <p className="demo-hint">
         <Icon name="sparkles" size={15} />
-        Acceso demo listo para usar
+        Acceso protegido con Supabase
       </p>
     </form>
   );

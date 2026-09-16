@@ -1,19 +1,35 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+import { getSupabaseConfig } from "./config";
 
-if (!supabaseUrl) {
-  throw new Error("Falta NEXT_PUBLIC_SUPABASE_URL en .env.local");
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
+  const { publishableKey, url } = getSupabaseConfig();
+
+  return createServerClient(url, publishableKey, {
+    cookieOptions: {
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    },
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, options, value }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Los Server Components no pueden escribir cookies. El proxy se
+          // encarga de renovar la sesión antes de que se rendericen.
+        }
+      },
+    },
+  });
 }
-
-if (!supabaseAnonKey) {
-  throw new Error("Falta NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local");
-}
-
-export const supabase = createClient(
-  supabaseUrl,
-  supabaseAnonKey
-);

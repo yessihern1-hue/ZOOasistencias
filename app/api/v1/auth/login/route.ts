@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { authenticate } from "@/server/auth/auth.service";
 import {
-  createSessionToken,
-  SESSION_COOKIE,
-  sessionCookieOptions,
-} from "@/server/auth/session";
+  authenticate,
+  AuthenticationRateLimitError,
+  InactiveEmployeeError,
+  InvalidCredentialsError,
+  MissingEmployeeProfileError,
+} from "@/server/auth/auth.service";
+
+const noStoreHeaders = { "Cache-Control": "private, no-store" };
 
 export async function POST(request: Request) {
   try {
@@ -13,33 +16,71 @@ export async function POST(request: Request) {
     if (!contentType.includes("application/json")) {
       return NextResponse.json(
         { error: "El contenido debe enviarse como JSON." },
-        { status: 415 },
+        { headers: noStoreHeaders, status: 415 },
       );
     }
 
-    const body = (await request.json()) as { email?: unknown; password?: unknown };
+    let body: { email?: unknown; password?: unknown };
+
+    try {
+      body = (await request.json()) as { email?: unknown; password?: unknown };
+    } catch {
+      return NextResponse.json(
+        { error: "El cuerpo de la solicitud no contiene JSON válido." },
+        { headers: noStoreHeaders, status: 400 },
+      );
+    }
+
     if (typeof body.email !== "string" || typeof body.password !== "string") {
       return NextResponse.json(
         { error: "Ingresa un correo y una contraseña válidos." },
-        { status: 400 },
+        { headers: noStoreHeaders, status: 400 },
       );
     }
 
-    const user = authenticate(body.email, body.password);
-    if (!user) {
+    const email = body.email.trim();
+    if (
+      !email.includes("@") ||
+      email.length > 254 ||
+      body.password.length < 6 ||
+      body.password.length > 128
+    ) {
       return NextResponse.json(
-        { error: "El correo o la contraseña no coinciden." },
-        { status: 401 },
+        { error: "Ingresa un correo y una contraseña válidos." },
+        { headers: noStoreHeaders, status: 400 },
       );
     }
 
-    const response = NextResponse.json({ user });
-    response.cookies.set(SESSION_COOKIE, createSessionToken(user), sessionCookieOptions);
-    return response;
-  } catch {
+    const user = await authenticate(email, body.password);
+    return NextResponse.json({ user }, { headers: noStoreHeaders });
+  } catch (error) {
+    if (error instanceof InvalidCredentialsError) {
+      return NextResponse.json(
+        { error: error.message },
+        { headers: noStoreHeaders, status: 401 },
+      );
+    }
+
+    if (error instanceof AuthenticationRateLimitError) {
+      return NextResponse.json(
+        { error: error.message },
+        { headers: noStoreHeaders, status: 429 },
+      );
+    }
+
+    if (
+      error instanceof MissingEmployeeProfileError ||
+      error instanceof InactiveEmployeeError
+    ) {
+      return NextResponse.json(
+        { error: error.message },
+        { headers: noStoreHeaders, status: 403 },
+      );
+    }
+
     return NextResponse.json(
       { error: "No pudimos iniciar sesión. Intenta nuevamente." },
-      { status: 500 },
+      { headers: noStoreHeaders, status: 500 },
     );
   }
 }

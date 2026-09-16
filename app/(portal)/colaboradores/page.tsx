@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 
 import { EmployeesView } from "@/features/employees/components/employees-view";
-import { requireUser } from "@/server/auth/dal";
+import { requireAdmin } from "@/server/auth/dal";
 import { getEmployees } from "@/server/employees/employee.service";
+import { getActiveWorkShifts } from "@/server/shifts/work-shift.service";
 
 export const metadata: Metadata = { title: "Colaboradores" };
 
 export default async function EmployeesPage() {
-  await requireUser();
-  return <EmployeesView employees={getEmployees()} />;
+  await requireAdmin();
+  const [employees, shifts] = await Promise.all([getEmployees(), getActiveWorkShifts()]);
+  return <EmployeesView initialEmployees={employees} shifts={shifts} />;
 }
