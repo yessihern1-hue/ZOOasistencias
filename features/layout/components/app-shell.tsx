@@ -9,11 +9,15 @@ import { Avatar } from "@/features/shared/components/avatar";
 import { Brand } from "@/features/shared/components/brand";
 import { Icon, type IconName } from "@/features/shared/components/icon";
 
-const navigation: Array<{ href: string; label: string; icon: IconName }> = [
-  { href: "/dashboard", label: "Resumen", icon: "dashboard" },
+const adminNavigation: Array<{ href: string; label: string; icon: IconName }> = [
+  { href: "/admin", label: "Resumen", icon: "dashboard" },
   { href: "/asistencia", label: "Tomar asistencia", icon: "clock" },
   { href: "/colaboradores", label: "Colaboradores", icon: "users" },
   { href: "/reportes", label: "Reportes", icon: "document" },
+];
+
+const employeeNavigation: typeof adminNavigation = [
+  { href: "/asistencia", label: "Tomar asistencia", icon: "clock" },
 ];
 
 export function AppShell({ children, user }: { children: ReactNode; user: SessionUser }) {
@@ -21,6 +25,7 @@ export function AppShell({ children, user }: { children: ReactNode; user: Sessio
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const navigation = user.role === "admin" ? adminNavigation : employeeNavigation;
 
   async function logout() {
     setIsLoggingOut(true);
@@ -109,11 +114,13 @@ export function AppShell({ children, user }: { children: ReactNode; user: Sessio
           >
             <Icon name="menu" />
           </button>
-          <label className="topbar-search">
-            <Icon name="search" size={18} />
-            <input aria-label="Buscar" placeholder="Buscar colaborador…" type="search" />
-            <kbd>⌘ K</kbd>
-          </label>
+          {user.role === "admin" ? (
+            <label className="topbar-search">
+              <Icon name="search" size={18} />
+              <input aria-label="Buscar" placeholder="Buscar colaborador…" type="search" />
+              <kbd>⌘ K</kbd>
+            </label>
+          ) : <span />}
           <div className="topbar-actions">
             <button aria-label="Notificaciones" className="icon-button notification-button" type="button">
               <Icon name="bell" size={19} />

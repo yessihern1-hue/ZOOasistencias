@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 import {
   authenticate,
   AuthenticationRateLimitError,
+  InactiveEmployeeError,
   InvalidCredentialsError,
+  MissingEmployeeProfileError,
 } from "@/server/auth/auth.service";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store" };
@@ -63,6 +65,16 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: error.message },
         { headers: noStoreHeaders, status: 429 },
+      );
+    }
+
+    if (
+      error instanceof MissingEmployeeProfileError ||
+      error instanceof InactiveEmployeeError
+    ) {
+      return NextResponse.json(
+        { error: error.message },
+        { headers: noStoreHeaders, status: 403 },
       );
     }
 

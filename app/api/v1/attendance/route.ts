@@ -7,6 +7,7 @@ import {
 } from "@/server/attendance/attendance.service";
 
 import {
+  PasswordChangeRequiredError,
   requireApiUser,
   UnauthorizedError,
 } from "@/server/auth/dal";
@@ -29,6 +30,10 @@ export async function GET() {
         { error: error.message },
         { status: 401 }
       );
+    }
+
+    if (error instanceof PasswordChangeRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 428 });
     }
 
     return NextResponse.json(
@@ -59,6 +64,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       action?: unknown;
       photo?: unknown;
+      observation?: unknown;
     };
 
     if (
@@ -69,6 +75,17 @@ export async function POST(request: Request) {
         {
           error: "La acción de asistencia no es válida.",
         },
+        { status: 400 }
+      );
+    }
+
+    if (
+      body.observation !== undefined &&
+      body.observation !== null &&
+      (typeof body.observation !== "string" || body.observation.length > 500)
+    ) {
+      return NextResponse.json(
+        { error: "La observación debe tener un máximo de 500 caracteres." },
         { status: 400 }
       );
     }
@@ -89,7 +106,10 @@ export async function POST(request: Request) {
     const result = await registerAttendance(
       user,
       body.action,
-      body.photo ?? null
+      body.photo ?? null,
+      typeof body.observation === "string"
+        ? body.observation.trim() || null
+        : null
     );
 
     return NextResponse.json(result);
@@ -104,6 +124,10 @@ export async function POST(request: Request) {
         { error: error.message },
         { status: 401 }
       );
+    }
+
+    if (error instanceof PasswordChangeRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 428 });
     }
 
     if (error instanceof AttendanceDomainError) {

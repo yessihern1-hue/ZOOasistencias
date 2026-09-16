@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type {
-  AttendanceAction,
   AttendanceMutationResponse,
   AttendancePageData,
   AttendanceRecord,
 } from "@/features/attendance/types";
-
 import { Avatar } from "@/features/shared/components/avatar";
 import { Icon } from "@/features/shared/components/icon";
 import { CameraCapture } from "./camera-capture";
@@ -20,360 +18,265 @@ const statusLabel = {
   pending: "Pendiente",
 };
 
-function formatClock(date: Date) {
+function formatClock(timestamp: number) {
   return new Intl.DateTimeFormat("es-GT", {
     timeZone: "America/Guatemala",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).format(date);
+  }).format(new Date(timestamp));
 }
 
-export function AttendanceView({
-  initialData,
-}: {
-  initialData: AttendancePageData;
-}) {
-  const [clock, setClock] = useState("--:--:--");
+function formatCountdown(totalSeconds: number) {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
 
-  const [currentRecord, setCurrentRecord] =
-    useState(initialData.currentUserRecord);
+  return [hours, minutes, seconds]
+    .map((value) => value.toString().padStart(2, "0"))
+    .join(":");
+}
 
-  const [records, setRecords] =
-    useState(initialData.records);
+function getRecordStatus(record: AttendanceRecord) {
+  if (record.departureStatus === "early" && record.checkOut) {
+    return { className: "status-late", label: "Salida anticipada" };
+  }
 
-  const [isSaving, setIsSaving] =
-    useState(false);
+  return {
+    className: `status-${record.status}`,
+    label: statusLabel[record.status],
+  };
+}
 
-  const [notice, setNotice] =
-    useState<{
-      type: "success" | "error";
-      text: string;
-    } | null>(null);
+export function AttendanceView({ initialData }: { initialData: AttendancePageData }) {
+  const [pageData, setPageData] = useState(initialData);
+  const [serverOffsetMs, setServerOffsetMs] = useState(
+    () => new Date(initialData.registrationState.serverNow).getTime() - Date.now()
+  );
+  const [nowMs, setNowMs] = useState(
+    () => Date.now() + serverOffsetMs
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [notice, setNotice] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [checkInPhoto, setCheckInPhoto] = useState<string | null>(null);
+  const [checkOutPhoto, setCheckOutPhoto] = useState<string | null>(null);
+  const [observation, setObservation] = useState("");
 
-  const [checkInPhoto, setCheckInPhoto] =
-    useState<string | null>(null);
-
-  const [checkOutPhoto, setCheckOutPhoto] =
-    useState<string | null>(null);
-
-  useEffect(() => {
-    const updateClock = () =>
-      setClock(formatClock(new Date()));
-
-    updateClock();
-
-    const timer = window.setInterval(
-      updateClock,
-      1000
-    );
-
-    return () =>
-      window.clearInterval(timer);
-  }, []);
-
-  const action: AttendanceAction =
-    currentRecord?.checkIn &&
-    !currentRecord.checkOut
-      ? "check-out"
-      : "check-in";
-
-  const requiresPhoto =
-    action === "check-in"
-      ? !checkInPhoto
-      : !checkOutPhoto;
-
-  const isComplete = Boolean(
-    currentRecord?.checkIn &&
-      currentRecord.checkOut
+  const registration = pageData.registrationState;
+  const currentRecord = pageData.currentUserRecord;
+  const action = registration.nextAction;
+  const canRegister =
+    registration.availability === "ready" ||
+    registration.availability === "working";
+  const requiresPhoto = action === "check-in" ? !checkInPhoto : !checkOutPhoto;
+  const isComplete = registration.availability === "completed";
+  const isCooldown = registration.availability === "cooldown";
+  const cooldownTarget = registration.nextAllowedCheckInAt
+    ? new Date(registration.nextAllowedCheckInAt).getTime()
+    : null;
+  const remainingSeconds = cooldownTarget
+    ? Math.max(0, Math.ceil((cooldownTarget - nowMs) / 1000))
+    : 0;
+  const summary = pageData.summary;
+  const attendancePercentage = summary.total > 0
+    ? Math.round(((summary.present + summary.late) / summary.total) * 100)
+    : 0;
+  const totalWorkedMinutes = pageData.currentUserSessions.reduce(
+    (total, session) => total + (session.workedMinutes ?? 0),
+    0
   );
 
-  const summary = useMemo(() => {
-    const newlyCheckedIn =
-      currentRecord?.checkIn &&
-      !initialData.currentUserRecord?.checkIn;
+  function applyPageData(data: AttendancePageData) {
+    const offset = new Date(data.registrationState.serverNow).getTime() - Date.now();
+    setServerOffsetMs(offset);
+    setNowMs(Date.now() + offset);
+    setPageData(data);
+  }
 
-    if (!newlyCheckedIn) {
-      return initialData.summary;
-    }
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now() + serverOffsetMs);
+    }, 1000);
 
-    return {
-      ...initialData.summary,
+    return () => window.clearInterval(timer);
+  }, [serverOffsetMs]);
 
-      present:
-        initialData.summary.present +
-        (currentRecord.status === "present"
-          ? 1
-          : 0),
+  useEffect(() => {
+    if (!isCooldown || !cooldownTarget) return;
 
-      late:
-        initialData.summary.late +
-        (currentRecord.status === "late"
-          ? 1
-          : 0),
+    const delay = Math.max(250, cooldownTarget - (Date.now() + serverOffsetMs) + 250);
+    const timer = window.setTimeout(async () => {
+      setIsRefreshing(true);
 
-      absent: Math.max(
-        0,
-        initialData.summary.absent - 1
-      ),
-    };
-  }, [currentRecord, initialData]);
+      try {
+        const response = await fetch("/api/v1/attendance", { cache: "no-store" });
+        if (!response.ok) return;
+        applyPageData((await response.json()) as AttendancePageData);
+      } finally {
+        setIsRefreshing(false);
+      }
+    }, delay);
 
-  const attendancePercentage =
-    summary.total > 0
-      ? Math.round(
-          (summary.present /
-            summary.total) *
-            100
-        )
-      : 0;
+    return () => window.clearTimeout(timer);
+  }, [cooldownTarget, isCooldown, serverOffsetMs]);
 
   async function register() {
-    if (isComplete) {
-      return;
-    }
+    if (!canRegister || !action) return;
 
     if (requiresPhoto) {
       setNotice({
         type: "error",
-        text:
-          action === "check-in"
-            ? "Debe capturar una fotografía antes de registrar la entrada."
-            : "Debe capturar una fotografía antes de registrar la salida.",
+        text: action === "check-in"
+          ? "Debe capturar una fotografía antes de registrar la entrada."
+          : "Debe capturar una fotografía antes de registrar la salida.",
       });
-
       return;
     }
 
     setIsSaving(true);
     setNotice(null);
 
-    const now = new Date();
-
-    const date =
-      now.toLocaleDateString("es-GT", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-
-    const time =
-      now.toLocaleTimeString("es-GT", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-
     try {
-      const response = await fetch(
-        "/api/v1/attendance",
-        {
-          method: "POST",
+      const response = await fetch("/api/v1/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          observation: observation.trim() || null,
+          photo: action === "check-in" ? checkInPhoto : checkOutPhoto,
+        }),
+      });
+      const result = (await response.json()) as AttendanceMutationResponse;
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            action,
-
-            photo:
-              action === "check-in"
-                ? checkInPhoto
-                : checkOutPhoto,
-          }),
-        }
-      );
-
-      const result =
-        (await response.json()) as AttendanceMutationResponse;
-
-      if (
-        !response.ok ||
-        !result.record
-      ) {
+      if (!response.ok || !result.record || !result.data) {
         setNotice({
           type: "error",
-          text:
-            result.error ??
-            "No se pudo guardar el registro.",
+          text: result.error ?? "No se pudo guardar el registro.",
         });
-
         return;
       }
 
-      setCurrentRecord(result.record);
-
-      if (action === "check-in") {
-        setCheckInPhoto(null);
-      } else {
-        setCheckOutPhoto(null);
-      }
-
-      setRecords((current) => {
-        const withoutCurrent =
-          current.filter(
-            (item) =>
-              item.employeeId !==
-              result.record!.employeeId
-          );
-
-        return [
-          result.record!,
-          ...withoutCurrent,
-        ];
-      });
-
+      applyPageData(result.data);
+      setCheckInPhoto(null);
+      setCheckOutPhoto(null);
+      setObservation("");
       setNotice({
         type: "success",
-        text: `Asistencia registrada correctamente.
-Fecha: ${date}
-Hora: ${time}
-Fotografía capturada.`,
+        text: result.message ?? "Asistencia registrada correctamente.",
       });
     } catch {
-      setNotice({
-        type: "error",
-        text:
-          "No hay conexión con el servidor.",
-      });
+      setNotice({ type: "error", text: "No hay conexión con el servidor." });
     } finally {
       setIsSaving(false);
     }
   }
 
+  const headline = registration.availability === "working"
+    ? "¿Terminaste esta sesión?"
+    : registration.availability === "ready"
+      ? registration.sessionCount > 0
+        ? "¿Listo para continuar?"
+        : "¿Listo para comenzar?"
+      : registration.availability === "cooldown"
+        ? "Jornada completada"
+        : registration.availability === "completed"
+          ? "Asistencia completa"
+          : "Registro no disponible";
+
+  const buttonLabel = isSaving
+    ? "Registrando…"
+    : isRefreshing
+      ? "Actualizando…"
+      : action === "check-in"
+        ? "Registrar entrada"
+        : action === "check-out"
+          ? "Registrar salida"
+          : isCooldown
+            ? `Disponible en ${formatCountdown(remainingSeconds)}`
+            : isComplete
+              ? "Límite diario completado"
+              : "Registro no disponible";
+
   return (
     <div className="page-stack">
       <header className="page-heading heading-with-date">
         <div>
-          <span className="eyebrow">
-            CONTROL DE ASISTENCIA
-          </span>
-
-          <h1>
-            Tomar asistencia
-          </h1>
-
-          <p>
-            Registra tu entrada y salida
-            para completar tu jornada.
-          </p>
+          <span className="eyebrow">CONTROL DE ASISTENCIA</span>
+          <h1>Tomar asistencia</h1>
+          <p>Registra tus entradas y salidas durante la jornada.</p>
         </div>
-
         <span className="date-chip">
-          <Icon
-            name="calendar"
-            size={17}
-          />
-
-          {initialData.formattedDate}
+          <Icon name="calendar" size={17} />
+          {pageData.formattedDate}
         </span>
       </header>
 
       <section className="checkin-layout">
         <article className="panel checkin-card">
-          <span className="checkin-label">
-            HORA ACTUAL
-          </span>
+          <span className="checkin-label">HORA OFICIAL</span>
+          <time className="live-clock">{formatClock(nowMs)}</time>
+          <p className="clock-zone">Hora de Guatemala · sincronizada con el servidor</p>
 
-          <time className="live-clock">
-            {clock}
-          </time>
-
-          <p className="clock-zone">
-            Hora de Guatemala · GMT-6
-          </p>
-
-          <div
-            className={`fingerprint-ring ${
-              isComplete
-                ? "fingerprint-complete"
-                : ""
-            }`}
-          >
+          <div className={`fingerprint-ring ${!canRegister ? "fingerprint-complete" : ""}`}>
             <span>
               <Icon
-                name={
-                  isComplete
-                    ? "check"
-                    : "fingerprint"
-                }
+                name={!canRegister ? "check" : "fingerprint"}
                 size={42}
               />
             </span>
           </div>
 
-          <h2>
-            {isComplete
-              ? "Jornada completada"
-              : action === "check-in"
-                ? "¿Listo para comenzar?"
-                : "¿Terminaste por hoy?"}
-          </h2>
-
+          <h2>{headline}</h2>
           <p>
-            {isComplete
-              ? "Tu entrada y salida quedaron registradas."
-              : action === "check-in"
-                ? "Registra tu entrada con un solo toque."
-                : "Registra tu hora de salida para cerrar la jornada."}
+            {registration.message}
+            {isCooldown && cooldownTarget
+              ? ` Tiempo restante: ${formatCountdown(remainingSeconds)}.`
+              : ""}
           </p>
 
-          {!isComplete &&
-            requiresPhoto && (
-              <CameraCapture
-                onCapture={(image) => {
-                  if (
-                    action ===
-                    "check-in"
-                  ) {
-                    setCheckInPhoto(
-                      image
-                    );
-                  } else {
-                    setCheckOutPhoto(
-                      image
-                    );
-                  }
-                }}
+          {canRegister && (
+            <label className="attendance-observation">
+              <span>Observación opcional</span>
+              <textarea
+                maxLength={500}
+                onChange={(event) => setObservation(event.target.value)}
+                placeholder={action === "check-in"
+                  ? "Ej. visita médica antes de ingresar"
+                  : "Ej. salida autorizada"
+                }
+                rows={2}
+                value={observation}
               />
-            )}
+            </label>
+          )}
+
+          {canRegister && requiresPhoto && (
+            <CameraCapture
+              onCapture={(image) => {
+                if (action === "check-in") setCheckInPhoto(image);
+                if (action === "check-out") setCheckOutPhoto(image);
+              }}
+            />
+          )}
 
           <button
             className="button button-primary checkin-button"
-            disabled={
-              isSaving ||
-              isComplete ||
-              requiresPhoto
-            }
+            disabled={isSaving || isRefreshing || !canRegister || requiresPhoto}
             onClick={register}
             type="button"
           >
-            <Icon
-              name={
-                action === "check-in"
-                  ? "arrow-right"
-                  : "logout"
-              }
-              size={19}
-            />
-
-            {isSaving
-              ? "Registrando…"
-              : isComplete
-                ? "Asistencia completa"
-                : action === "check-in"
-                  ? "Registrar entrada"
-                  : "Registrar salida"}
+            <Icon name={action === "check-out" ? "logout" : "arrow-right"} size={19} />
+            {buttonLabel}
           </button>
 
           {notice && (
-            <p
-              className={`inline-notice notice-${notice.type}`}
-              role="status"
-            >
+            <p className={`inline-notice notice-${notice.type}`} role="status">
               {notice.text}
             </p>
           )}
@@ -383,274 +286,85 @@ Fotografía capturada.`,
           <article className="panel today-card">
             <div className="panel-heading">
               <div>
-                <h2>
-                  Tu jornada de hoy
-                </h2>
-
-                <p>
-                  Horario asignado:{" "}
-                  {initialData.currentUserSchedule ||
-                    "Sin jornada"}
-                </p>
+                <h2>Tu jornada de hoy</h2>
+                <p>Horario: {pageData.currentUserSchedule || "Sin jornada"}</p>
               </div>
-
-              <span
-                className={`status-badge ${
-                  currentRecord
-                    ? `status-${currentRecord.status}`
-                    : "status-pending"
-                }`}
-              >
-                {currentRecord
-                  ? statusLabel[
-                      currentRecord.status
-                    ]
-                  : "Sin iniciar"}
+              <span className={`status-badge ${currentRecord
+                ? getRecordStatus(currentRecord).className
+                : "status-pending"
+              }`}>
+                {currentRecord ? getRecordStatus(currentRecord).label : "Sin iniciar"}
               </span>
+            </div>
+
+            <div className="session-meta">
+              <span>Sesiones <strong>{registration.sessionCount}/{registration.maxSessions || "—"}</strong></span>
+              <span>Tiempo registrado <strong>{Math.floor(totalWorkedMinutes / 60)}h {totalWorkedMinutes % 60}m</strong></span>
             </div>
 
             <div className="timeline-row">
               <div className="timeline-point timeline-point-active">
-                <span>
-                  <Icon
-                    name="arrow-right"
-                    size={16}
-                  />
-                </span>
-
-                <div>
-                  <small>
-                    ENTRADA
-                  </small>
-
-                  <strong>
-                    {currentRecord?.checkIn ??
-                      "--:--"}
-                  </strong>
-                </div>
+                <span><Icon name="arrow-right" size={16} /></span>
+                <div><small>ENTRADA ACTUAL</small><strong>{currentRecord?.checkIn ?? "--:--"}</strong></div>
               </div>
-
               <div className="timeline-line">
-                <span
-                  style={{
-                    width:
-                      currentRecord?.checkOut
-                        ? "100%"
-                        : currentRecord?.checkIn
-                          ? "50%"
-                          : "0%",
-                  }}
-                />
+                <span style={{ width: currentRecord?.checkOut ? "100%" : currentRecord?.checkIn ? "50%" : "0%" }} />
               </div>
-
-              <div
-                className={`timeline-point ${
-                  currentRecord?.checkOut
-                    ? "timeline-point-active"
-                    : ""
-                }`}
-              >
-                <span>
-                  <Icon
-                    name="logout"
-                    size={16}
-                  />
-                </span>
-
-                <div>
-                  <small>
-                    SALIDA
-                  </small>
-
-                  <strong>
-                    {currentRecord?.checkOut ??
-                      "--:--"}
-                  </strong>
-                </div>
+              <div className={`timeline-point ${currentRecord?.checkOut ? "timeline-point-active" : ""}`}>
+                <span><Icon name="logout" size={16} /></span>
+                <div><small>SALIDA ACTUAL</small><strong>{currentRecord?.checkOut ?? "--:--"}</strong></div>
               </div>
             </div>
           </article>
 
           <article className="panel team-summary-card">
             <div className="panel-heading">
-              <div>
-                <h2>
-                  Equipo hoy
-                </h2>
-
-                <p>
-                  Estado general de
-                  asistencia
-                </p>
-              </div>
+              <div><h2>Equipo hoy</h2><p>Estado general de asistencia</p></div>
             </div>
-
             <div className="mini-summary-grid">
-              <div>
-                <span className="summary-dot dot-green" />
-
-                <strong>
-                  {summary.present}
-                </strong>
-
-                <small>
-                  Presentes
-                </small>
-              </div>
-
-              <div>
-                <span className="summary-dot dot-amber" />
-
-                <strong>
-                  {summary.late}
-                </strong>
-
-                <small>
-                  Tarde
-                </small>
-              </div>
-
-              <div>
-                <span className="summary-dot dot-red" />
-
-                <strong>
-                  {summary.absent}
-                </strong>
-
-                <small>
-                  Ausentes
-                </small>
-              </div>
+              <div><span className="summary-dot dot-green" /><strong>{summary.present}</strong><small>Presentes</small></div>
+              <div><span className="summary-dot dot-amber" /><strong>{summary.late}</strong><small>Tarde</small></div>
+              <div><span className="summary-dot dot-red" /><strong>{summary.absent}</strong><small>Ausentes</small></div>
             </div>
-
-            <div
-              className="progress-bar"
-              aria-label={`${attendancePercentage}% de asistencia`}
-            >
-              <span
-                style={{
-                  width: `${attendancePercentage}%`,
-                }}
-              />
+            <div className="progress-bar" aria-label={`${attendancePercentage}% de asistencia`}>
+              <span style={{ width: `${attendancePercentage}%` }} />
             </div>
-
-            <p className="summary-foot">
-              <strong>
-                {attendancePercentage}%
-              </strong>{" "}
-              de asistencia general
-            </p>
+            <p className="summary-foot"><strong>{attendancePercentage}%</strong> de asistencia general</p>
           </article>
         </div>
       </section>
 
       <section className="panel recent-panel">
         <div className="panel-heading">
-          <div>
-            <h2>
-              Asistencia del equipo
-            </h2>
-
-            <p>
-              Registros del día en
-              tiempo real
-            </p>
-          </div>
-
-          <label className="small-search">
-            <Icon
-              name="search"
-              size={16}
-            />
-
-            <input
-              aria-label="Buscar en registros"
-              placeholder="Buscar…"
-            />
-          </label>
+          <div><h2>Sesiones registradas</h2><p>Entradas y salidas del día en tiempo real</p></div>
         </div>
-
         <div className="table-scroll">
           <table className="data-table">
             <thead>
-              <tr>
-                <th>
-                  COLABORADOR
-                </th>
-
-                <th>
-                  HORARIO
-                </th>
-
-                <th>
-                  ENTRADA
-                </th>
-
-                <th>
-                  SALIDA
-                </th>
-
-                <th>
-                  ESTADO
-                </th>
-              </tr>
+              <tr><th>COLABORADOR</th><th>SESIÓN</th><th>ENTRADA</th><th>SALIDA</th><th>TIEMPO</th><th>OBSERVACIÓN</th><th>ESTADO</th></tr>
             </thead>
-
             <tbody>
-              {records.map(
-                (
-                  record: AttendanceRecord
-                ) => (
+              {pageData.records.map((record) => {
+                const recordStatus = getRecordStatus(record);
+                const recordObservation = record.checkOutObservation ?? record.checkInObservation;
+
+                return (
                   <tr key={record.id}>
                     <td>
                       <div className="person-cell">
-                        <Avatar
-                          initials={
-                            record.initials
-                          }
-                          tone={
-                            record.avatarTone
-                          }
-                          size="sm"
-                        />
-
-                        <strong>
-                          {
-                            record.employeeName
-                          }
-                        </strong>
+                        <Avatar initials={record.initials} tone={record.avatarTone} size="sm" />
+                        <span><strong>{record.employeeName}</strong><small>{record.schedule || "Sin horario"}</small></span>
                       </div>
                     </td>
-
-                    <td>
-                      {record.schedule ||
-                        "—"}
-                    </td>
-
-                    <td className="time-cell">
-                      {record.checkIn ??
-                        "—"}
-                    </td>
-
-                    <td className="time-cell">
-                      {record.checkOut ??
-                        "—"}
-                    </td>
-
-                    <td>
-                      <span
-                        className={`status-badge status-${record.status}`}
-                      >
-                        {
-                          statusLabel[
-                            record.status
-                          ]
-                        }
-                      </span>
-                    </td>
+                    <td>#{record.sessionSequence}</td>
+                    <td className="time-cell">{record.checkIn ?? "—"}</td>
+                    <td className="time-cell">{record.checkOut ?? "—"}</td>
+                    <td>{record.workedMinutes === null ? "En curso" : `${Math.floor(record.workedMinutes / 60)}h ${record.workedMinutes % 60}m`}</td>
+                    <td>{recordObservation || "—"}</td>
+                    <td><span className={`status-badge ${recordStatus.className}`}>{recordStatus.label}</span></td>
                   </tr>
-                )
-              )}
+                );
+              })}
             </tbody>
           </table>
         </div>

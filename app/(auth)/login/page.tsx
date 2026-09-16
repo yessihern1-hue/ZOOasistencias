@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/features/auth/components/login-form";
+import { getUserEntryPath } from "@/features/auth/navigation";
 import { Brand } from "@/features/shared/components/brand";
 import { Icon } from "@/features/shared/components/icon";
 import { getCurrentUser } from "@/server/auth/dal";
@@ -16,7 +17,7 @@ const benefits = [
 
 export default async function LoginPage() {
   const user = await getCurrentUser();
-  if (user) redirect("/dashboard");
+  if (user) redirect(getUserEntryPath(user));
 
   return (
     <main className="login-page">

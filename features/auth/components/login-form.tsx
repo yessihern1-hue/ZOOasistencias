@@ -4,6 +4,7 @@ import { type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { LoginResponse } from "@/features/auth/types";
+import { getUserEntryPath } from "@/features/auth/navigation";
 import { Icon } from "@/features/shared/components/icon";
 
 export function LoginForm() {
@@ -35,7 +36,12 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/dashboard");
+      if (!result.user) {
+        setError("No se recibió el perfil del usuario.");
+        return;
+      }
+
+      router.push(getUserEntryPath(result.user));
       router.refresh();
     } catch {
       setError("No hay conexión con el servidor. Intenta de nuevo.");

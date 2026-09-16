@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createSupabaseAdminClient } from "@/server/supabase/admin";
+import { createSupabaseServerClient } from "@/server/supabase/client";
 
 const BUCKET_NAME = "attendance-photos";
 
@@ -62,8 +62,8 @@ export async function uploadAttendancePhoto(
   const path =
     `${userId}/${dateKey}/${fileName}`;
 
-  const supabaseAdmin = createSupabaseAdminClient();
-  const { error } = await supabaseAdmin.storage
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.storage
     .from(BUCKET_NAME)
     .upload(path, buffer, {
       contentType: mimeType,
@@ -77,4 +77,15 @@ export async function uploadAttendancePhoto(
   }
 
   return path;
+}
+
+export async function deleteAttendancePhoto(path: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.storage
+    .from(BUCKET_NAME)
+    .remove([path]);
+
+  if (error) {
+    throw new Error(`No se pudo eliminar la fotografía: ${error.message}`);
+  }
 }

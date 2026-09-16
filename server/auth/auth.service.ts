@@ -1,29 +1,29 @@
 import "server-only";
 
-import type { User } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import type { SessionUser, UserRole } from "@/features/auth/types";
+import type { EmployeeStatus } from "@/features/employees/types";
 import { createSupabaseServerClient } from "@/server/supabase/client";
+
+type EmployeeIdentityRow = {
+  id: string;
+  full_name: string;
+  email: string;
+  role: UserRole;
+  employment_status: "active" | "inactive";
+  effective_status: EmployeeStatus;
+  must_change_password: boolean;
+};
+
+export type LoadedSessionUser = SessionUser & {
+  employmentStatus: "active" | "inactive";
+};
 
 const roleLabels: Record<UserRole, string> = {
   admin: "Administración",
-  supervisor: "Supervisión",
-  collaborator: "Colaborador",
+  employee: "Empleado",
 };
-
-function isUserRole(value: unknown): value is UserRole {
-  return value === "admin" || value === "supervisor" || value === "collaborator";
-}
-
-function getDisplayName(user: User) {
-  const fullName = user.user_metadata.full_name;
-  const name = user.user_metadata.name;
-
-  if (typeof fullName === "string" && fullName.trim()) return fullName.trim();
-  if (typeof name === "string" && name.trim()) return name.trim();
-
-  return user.email?.split("@")[0] || "Usuario";
-}
 
 function getInitials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -36,18 +36,56 @@ function getInitials(name: string) {
   );
 }
 
-export function mapSupabaseUser(user: User): SessionUser {
-  const appRole = user.app_metadata.role;
-  const role: UserRole = isUserRole(appRole) ? appRole : "collaborator";
-  const name = getDisplayName(user);
+export async function loadSessionUser(
+  supabase: SupabaseClient,
+  authUser: User
+): Promise<LoadedSessionUser | null> {
+  const { data, error } = await supabase
+    .from("employee_effective_status")
+    .select(`
+      id,
+      full_name,
+      email,
+      role,
+      employment_status,
+      effective_status,
+      must_change_password
+    `)
+    .eq("auth_user_id", authUser.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`No se pudo consultar el perfil del empleado: ${error.message}`);
+  }
+  if (!data) return null;
+
+  const employee = data as EmployeeIdentityRow;
 
   return {
+    id: authUser.id,
+    employeeId: employee.id,
+    name: employee.full_name,
+    email: employee.email,
+    role: employee.role,
+    roleLabel: roleLabels[employee.role],
+    initials: getInitials(employee.full_name),
+    status: employee.effective_status,
+    employmentStatus: employee.employment_status,
+    mustChangePassword: employee.must_change_password,
+  };
+}
+
+export function toSessionUser(user: LoadedSessionUser): SessionUser {
+  return {
     id: user.id,
-    name,
-    email: user.email ?? "",
-    role,
-    roleLabel: roleLabels[role],
-    initials: getInitials(name),
+    employeeId: user.employeeId,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    roleLabel: user.roleLabel,
+    initials: user.initials,
+    status: user.status,
+    mustChangePassword: user.mustChangePassword,
   };
 }
 
@@ -62,6 +100,20 @@ export class AuthenticationRateLimitError extends Error {
   constructor() {
     super("Demasiados intentos. Espera un momento antes de volver a intentar.");
     this.name = "AuthenticationRateLimitError";
+  }
+}
+
+export class MissingEmployeeProfileError extends Error {
+  constructor() {
+    super("Tu cuenta todavía no está asociada a un empleado. Contacta al administrador.");
+    this.name = "MissingEmployeeProfileError";
+  }
+}
+
+export class InactiveEmployeeError extends Error {
+  constructor() {
+    super("Tu usuario está inactivo. Contacta al administrador para recuperar el acceso.");
+    this.name = "InactiveEmployeeError";
   }
 }
 
@@ -84,5 +136,17 @@ export async function authenticate(email: string, password: string) {
 
   if (!data.user || !data.session) throw new InvalidCredentialsError();
 
-  return mapSupabaseUser(data.user);
+  const user = await loadSessionUser(supabase, data.user);
+
+  if (!user) {
+    await supabase.auth.signOut({ scope: "local" });
+    throw new MissingEmployeeProfileError();
+  }
+
+  if (user.employmentStatus === "inactive") {
+    await supabase.auth.signOut({ scope: "local" });
+    throw new InactiveEmployeeError();
+  }
+
+  return toSessionUser(user);
 }
