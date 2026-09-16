@@ -27,6 +27,7 @@ La aplicación usa estas variables:
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase. |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clave pública `publishable` de Supabase. También se admite `NEXT_PUBLIC_SUPABASE_ANON_KEY` para proyectos anteriores. |
+| `SUPABASE_SECRET_KEY` | Clave secreta solo para acciones administrativas del servidor, como invitar o crear usuarios. No debe usarse en componentes cliente. |
 
 Los valores de Supabase se encuentran en la configuración API del proyecto. Después de modificar `.env.local`, reinicia `npm run dev` para que Next.js cargue los cambios.
 
@@ -34,6 +35,42 @@ El inicio de sesión usa Supabase Auth con correo y contraseña. El nombre visib
 se toma de `user_metadata.full_name` (o `user_metadata.name`). El rol se toma
 exclusivamente de `app_metadata.role` y admite `admin`, `supervisor` o
 `collaborator`; si no existe, se asigna `collaborator`.
+
+## Base de datos
+
+La migración principal está en `supabase/migrations/20260915120000_attendance_redesign.sql`.
+El modelo nuevo deja las tablas prototipo intactas y agrega:
+
+- `employees`: perfil interno del empleado, vinculado opcionalmente a `auth.users`.
+- `work_shifts` y `work_shift_days`: jornadas configurables por día, tolerancia, espera para nueva entrada y máximo de sesiones.
+- `employee_shift_assignments`: asignación vigente de jornada por empleado.
+- `employee_absences`: vacaciones y permisos con aprobación.
+- `attendance_sessions`: ciclos de entrada/salida; permite varias sesiones al día.
+- Vistas `employee_effective_status`, `attendance_daily_overview` y `attendance_weekly_totals`.
+- Funciones `clock_in(photo_path, observation)` y `clock_out(photo_path, observation)` para registrar asistencia desde la base.
+
+Para aplicarla con Supabase CLI:
+
+```bash
+supabase db push
+```
+
+Después de aplicar la migración, crea el primer registro admin desde SQL Editor o
+desde un script de servidor con la secret key. Ese primer admin permite gestionar
+empleados desde la app:
+
+```sql
+insert into public.employees (auth_user_id, full_name, email, role)
+values (
+  'UUID_DEL_USUARIO_EN_AUTH',
+  'Administrador',
+  'admin@empresa.com',
+  'admin'
+);
+```
+
+Las fotos de asistencia se guardan como archivos en el bucket privado
+`attendance-photos`; la tabla solo conserva el path.
 
 ## Arquitectura
 
@@ -81,14 +118,15 @@ Las páginas del servidor no llaman a la API interna: consultan el servicio dire
 
 ## Estado actual y siguiente paso para producción
 
-Esta entrega es un prototipo funcional. La autenticación y la asistencia ya usan
-Supabase; los colaboradores y varios indicadores todavía son datos semilla. Antes
-de usarla con datos reales se debe:
+Esta entrega es un prototipo funcional. La autenticación ya usa Supabase y el
+esquema productivo de asistencia quedó versionado en migración; falta conectar la
+interfaz a las nuevas tablas y funciones. Antes de usarla con datos reales se debe:
 
-1. Versionar el esquema y las migraciones de las tablas de perfiles, jornadas y asistencias.
-2. Definir políticas RLS para que cada colaborador solo acceda a los registros permitidos.
-3. Aplicar autorización por rol en las operaciones administrativas.
-4. Añadir pruebas automatizadas, auditoría de cambios y reglas para turnos nocturnos, vacaciones y días festivos.
+1. Migrar o descartar las tablas prototipo (`users`, `attendance`, `employee_shifts`, `work_shifts`) cuando ya no se necesiten.
+2. Conectar los repositorios a `employees`, `attendance_sessions` y las funciones `clock_in/clock_out`.
+3. Reducir la navegación a dos vistas: asistencia del empleado y panel admin.
+4. Implementar invitación/creación de usuarios desde servidor con `SUPABASE_SECRET_KEY`.
+5. Añadir pruebas automatizadas y auditoría de cambios administrativos.
 
 La separación `servicio → repositorio` ya deja preparado ese cambio: la interfaz no depende del almacenamiento de demostración.
 

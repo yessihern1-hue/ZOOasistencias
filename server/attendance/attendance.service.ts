@@ -16,6 +16,7 @@ import {
   getTime,
 } from "@/server/shared/date";
 
+import { uploadAttendancePhoto } from "@/server/storage/attendance-photo.service";
 import { attendanceRepository } from "./attendance.repository";
 
 const LATE_TOLERANCE_MINUTES = 10;
@@ -40,24 +41,30 @@ function calculateWorkedMinutes(
   const checkInMinutes = timeToMinutes(checkIn);
   let checkOutMinutes = timeToMinutes(checkOut);
 
-  // Para jornadas que terminan después de medianoche
   if (checkOutMinutes < checkInMinutes) {
     checkOutMinutes += 24 * 60;
   }
 
-  return Math.max(0, checkOutMinutes - checkInMinutes);
+  return Math.max(
+    0,
+    checkOutMinutes - checkInMinutes
+  );
 }
 
 function isLateArrival(
   checkInTime: string,
   shiftStartTime: string
 ): boolean {
-  const checkInMinutes = timeToMinutes(checkInTime);
-  const shiftStartMinutes = timeToMinutes(shiftStartTime);
+  const checkInMinutes =
+    timeToMinutes(checkInTime);
+
+  const shiftStartMinutes =
+    timeToMinutes(shiftStartTime);
 
   return (
     checkInMinutes >
-    shiftStartMinutes + LATE_TOLERANCE_MINUTES
+    shiftStartMinutes +
+      LATE_TOLERANCE_MINUTES
   );
 }
 
@@ -72,15 +79,18 @@ function calculateSummary(
   records: AttendanceRecord[]
 ): AttendanceSummary {
   const present = records.filter(
-    (record) => record.status === "present"
+    (record) =>
+      record.status === "present"
   ).length;
 
   const late = records.filter(
-    (record) => record.status === "late"
+    (record) =>
+      record.status === "late"
   ).length;
 
   const absent = records.filter(
-    (record) => record.status === "absent"
+    (record) =>
+      record.status === "absent"
   ).length;
 
   return {
@@ -99,17 +109,31 @@ export async function getAttendancePageData(
   const records =
     await attendanceRepository.listByDate(dateKey);
 
+  const currentUserRecord =
+    records.find(
+      (record) => record.employeeId === userId
+    ) ?? null;
+
+  const employeeShift =
+    await attendanceRepository.findActiveShiftByEmployee(
+      userId,
+      dateKey
+    );
+
+  const currentUserSchedule =
+    employeeShift?.work_shifts
+      ? formatSchedule(
+          employeeShift.work_shifts.start_time,
+          employeeShift.work_shifts.end_time
+        )
+      : null;
+
   return {
     dateKey,
     formattedDate: formatLongDate(),
-
     records,
-
-    currentUserRecord:
-      records.find(
-        (record) => record.employeeId === userId
-      ) ?? null,
-
+    currentUserRecord,
+    currentUserSchedule,
     summary: calculateSummary(records),
   };
 }
@@ -149,8 +173,11 @@ export async function registerAttendance(
     );
   }
 
-  const shift = employeeShift.work_shifts;
-  const shiftId = employeeShift.shift_id;
+  const shift =
+    employeeShift.work_shifts;
+
+  const shiftId =
+    employeeShift.shift_id;
 
   const schedule = formatSchedule(
     shift.start_time,
@@ -180,25 +207,38 @@ export async function registerAttendance(
       shift.start_time
     );
 
+    const checkInPhotoPath =
+      await uploadAttendancePhoto(
+        user.id,
+        dateKey,
+        "check-in",
+        photo
+      );
+
     const record: AttendanceRecord = {
-      id: existing?.id ?? randomUUID(),
+      id:
+        existing?.id ??
+        randomUUID(),
 
       employeeId: user.id,
       employeeName: user.name,
       initials: user.initials,
-
       avatarTone: "blue",
-      department: "—",
 
       schedule,
 
       checkIn: time,
       checkOut: null,
 
-      checkInPhoto: photo,
+      checkInPhoto:
+        checkInPhotoPath,
+
       checkOutPhoto: null,
 
-      status: isLate ? "late" : "present",
+      status:
+        isLate
+          ? "late"
+          : "present",
     };
 
     const savedRecord =
@@ -215,11 +255,11 @@ export async function registerAttendance(
         employeeName: user.name,
         initials: user.initials,
         avatarTone: "blue",
-        department: "—",
         schedule,
       },
 
-      message: `Entrada registrada a las ${time}.`,
+      message:
+        `Entrada registrada a las ${time}.`,
     };
   }
 
@@ -238,10 +278,19 @@ export async function registerAttendance(
     );
   }
 
-  const workedMinutes = calculateWorkedMinutes(
-    existing.checkIn,
-    time
-  );
+  const workedMinutes =
+    calculateWorkedMinutes(
+      existing.checkIn,
+      time
+    );
+
+  const checkOutPhotoPath =
+    await uploadAttendancePhoto(
+      user.id,
+      dateKey,
+      "check-out",
+      photo
+    );
 
   const updated: AttendanceRecord = {
     ...existing,
@@ -249,11 +298,12 @@ export async function registerAttendance(
     employeeName: user.name,
     initials: user.initials,
     avatarTone: "blue",
-    department: "—",
     schedule,
 
     checkOut: time,
-    checkOutPhoto: photo,
+
+    checkOutPhoto:
+      checkOutPhotoPath,
   };
 
   const savedRecord =
@@ -270,10 +320,10 @@ export async function registerAttendance(
       employeeName: user.name,
       initials: user.initials,
       avatarTone: "blue",
-      department: "—",
       schedule,
     },
 
-    message: `Salida registrada a las ${time}.`,
+    message:
+      `Salida registrada a las ${time}.`,
   };
 }

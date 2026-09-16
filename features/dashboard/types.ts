@@ -1,4 +1,7 @@
-import type { AvatarTone, AttendanceStatus } from "@/features/attendance/types";
+import type {
+  AvatarTone,
+  AttendanceStatus,
+} from "@/features/attendance/types";
 
 export type DashboardStat = {
   label: string;
@@ -13,7 +16,6 @@ export type RecentAttendanceItem = {
   employeeName: string;
   initials: string;
   avatarTone: AvatarTone;
-  department: string;
   time: string;
   status: AttendanceStatus;
 };

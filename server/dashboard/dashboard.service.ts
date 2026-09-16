@@ -54,7 +54,6 @@ export async function getDashboardData(): Promise<DashboardData> {
         employeeName: record.employeeName,
         initials: record.initials,
         avatarTone: record.avatarTone,
-        department: record.department,
         time: record.checkIn!,
         status: record.status,
       })),

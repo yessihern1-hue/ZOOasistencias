@@ -3,6 +3,21 @@ import "server-only";
 import type { AttendanceRecord } from "@/features/attendance/types";
 import { createSupabaseServerClient } from "@/server/supabase/client";
 
+type UserRelation = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  employee_status: string;
+};
+
+type WorkShiftRelation = {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+};
+
 type AttendanceRow = {
   id: string;
   user_id: string;
@@ -15,6 +30,8 @@ type AttendanceRow = {
   worked_minutes: number | null;
   status: string;
   observation: string | null;
+  users: UserRelation | UserRelation[] | null;
+  work_shifts: WorkShiftRelation | WorkShiftRelation[] | null;
 };
 
 type EmployeeShiftRow = {
@@ -22,31 +39,64 @@ type EmployeeShiftRow = {
   start_date: string;
   end_date: string | null;
   active: boolean;
-  work_shifts: {
-    id: string;
-    name: string;
-    start_time: string;
-    end_time: string;
-  } | null;
+  work_shifts: WorkShiftRelation | null;
 };
 
+const attendanceSelect = `
+  *,
+  users (
+    id,
+    name,
+    email,
+    role,
+    employee_status
+  ),
+  work_shifts (
+    id,
+    name,
+    start_time,
+    end_time
+  )
+`;
+
+function getFirstRelation<T>(relation: T | T[] | null): T | null {
+  if (!relation) return null;
+  if (Array.isArray(relation)) return relation[0] ?? null;
+  return relation;
+}
+
+function getInitials(name: string): string {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("") || "US"
+  );
+}
+
+function formatSchedule(startTime: string, endTime: string): string {
+  return `${startTime.slice(0, 5)} – ${endTime.slice(0, 5)}`;
+}
+
 function mapAttendanceRow(row: AttendanceRow): AttendanceRecord {
+  const user = getFirstRelation(row.users);
+  const shift = getFirstRelation(row.work_shifts);
+  const employeeName = user?.name ?? "";
+
   return {
     id: row.id,
     employeeId: row.user_id,
-
-    // Estos datos se completarán luego con users
-    employeeName: "",
-    initials: "",
+    employeeName,
+    initials: getInitials(employeeName),
     avatarTone: "blue",
-    department: "",
-
-    schedule: "",
+    schedule: shift ? formatSchedule(shift.start_time, shift.end_time) : "",
     checkIn: row.check_in,
     checkOut: row.check_out,
     checkInPhoto: row.check_in_photo,
     checkOutPhoto: row.check_out_photo,
-
     status: row.status as AttendanceRecord["status"],
   };
 }
@@ -56,14 +106,12 @@ export const attendanceRepository = {
     const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
       .from("attendance")
-      .select("*")
+      .select(attendanceSelect)
       .eq("date", dateKey)
       .order("check_in", { ascending: true });
 
     if (error) {
-      throw new Error(
-        `Error al consultar asistencias: ${error.message}`
-      );
+      throw new Error(`Error al consultar asistencias: ${error.message}`);
     }
 
     return ((data ?? []) as AttendanceRow[]).map(mapAttendanceRow);
@@ -76,7 +124,7 @@ export const attendanceRepository = {
     const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
       .from("attendance")
-      .select("*")
+      .select(attendanceSelect)
       .eq("user_id", employeeId)
       .eq("date", dateKey)
       .maybeSingle();
@@ -87,9 +135,7 @@ export const attendanceRepository = {
       );
     }
 
-    if (!data) {
-      return null;
-    }
+    if (!data) return null;
 
     return mapAttendanceRow(data as AttendanceRow);
   },
@@ -122,46 +168,25 @@ export const attendanceRepository = {
       .maybeSingle();
 
     if (error) {
-      throw new Error(
-        `Error al consultar la jornada del empleado: ${error.message}`
-      );
+      throw new Error(`Error al consultar la jornada del empleado: ${error.message}`);
     }
 
-    if (!data) {
-      return null;
-    }
+    if (!data) return null;
 
     const row = data as {
       shift_id: string;
       start_date: string;
       end_date: string | null;
       active: boolean;
-      work_shifts:
-        | {
-            id: string;
-            name: string;
-            start_time: string;
-            end_time: string;
-          }
-        | {
-            id: string;
-            name: string;
-            start_time: string;
-            end_time: string;
-          }[]
-        | null;
+      work_shifts: WorkShiftRelation | WorkShiftRelation[] | null;
     };
-
-    const workShift = Array.isArray(row.work_shifts)
-      ? row.work_shifts[0] ?? null
-      : row.work_shifts;
 
     return {
       shift_id: row.shift_id,
       start_date: row.start_date,
       end_date: row.end_date,
       active: row.active,
-      work_shifts: workShift,
+      work_shifts: getFirstRelation(row.work_shifts),
     };
   },
 
@@ -190,13 +215,11 @@ export const attendanceRepository = {
       .upsert(payload, {
         onConflict: "user_id,date",
       })
-      .select()
+      .select(attendanceSelect)
       .single();
 
     if (error) {
-      throw new Error(
-        `Error al guardar la asistencia: ${error.message}`
-      );
+      throw new Error(`Error al guardar la asistencia: ${error.message}`);
     }
 
     return mapAttendanceRow(data as AttendanceRow);

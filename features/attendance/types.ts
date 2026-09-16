@@ -1,5 +1,15 @@
-export type AttendanceStatus = "present" | "late" | "absent" | "pending";
-export type AvatarTone = "blue" | "purple" | "orange" | "green" | "pink";
+export type AttendanceStatus =
+  | "present"
+  | "late"
+  | "absent"
+  | "pending";
+
+export type AvatarTone =
+  | "blue"
+  | "purple"
+  | "orange"
+  | "green"
+  | "pink";
 
 export type AttendanceRecord = {
   id: string;
@@ -7,14 +17,12 @@ export type AttendanceRecord = {
   employeeName: string;
   initials: string;
   avatarTone: AvatarTone;
-  department: string;
   schedule: string;
   checkIn: string | null;
   checkOut: string | null;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
   status: AttendanceStatus;
-  
 };
 
 export type AttendanceSummary = {
@@ -29,10 +37,13 @@ export type AttendancePageData = {
   formattedDate: string;
   records: AttendanceRecord[];
   currentUserRecord: AttendanceRecord | null;
+  currentUserSchedule: string | null;
   summary: AttendanceSummary;
 };
 
-export type AttendanceAction = "check-in" | "check-out";
+export type AttendanceAction =
+  | "check-in"
+  | "check-out";
 
 export type AttendanceMutationResponse = {
   record?: AttendanceRecord;
