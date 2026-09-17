@@ -7,6 +7,7 @@ import type {
   AttendancePageData,
   AttendanceRecord,
 } from "@/features/attendance/types";
+import { GeolocationError, getCurrentCoordinates } from "@/features/attendance/geolocation";
 import { Avatar } from "@/features/shared/components/avatar";
 import { Icon } from "@/features/shared/components/icon";
 import { CameraCapture } from "./camera-capture";
@@ -59,6 +60,7 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
     () => Date.now() + serverOffsetMs
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notice, setNotice] = useState<{
     type: "success" | "error";
@@ -139,10 +141,14 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
       return;
     }
 
-    setIsSaving(true);
     setNotice(null);
 
     try {
+      setIsLocating(true);
+      const location = await getCurrentCoordinates();
+      setIsLocating(false);
+      setIsSaving(true);
+
       const response = await fetch("/api/v1/attendance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,6 +156,7 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
           action,
           observation: observation.trim() || null,
           photo: action === "check-in" ? checkInPhoto : checkOutPhoto,
+          location,
         }),
       });
       const result = (await response.json()) as AttendanceMutationResponse;
@@ -170,9 +177,15 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
         type: "success",
         text: result.message ?? "Asistencia registrada correctamente.",
       });
-    } catch {
-      setNotice({ type: "error", text: "No hay conexión con el servidor." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof GeolocationError
+          ? error.message
+          : "No hay conexión con el servidor.",
+      });
     } finally {
+      setIsLocating(false);
       setIsSaving(false);
     }
   }
@@ -189,7 +202,9 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
           ? "Asistencia completa"
           : "Registro no disponible";
 
-  const buttonLabel = isSaving
+  const buttonLabel = isLocating
+    ? "Obteniendo ubicación…"
+    : isSaving
     ? "Registrando…"
     : isRefreshing
       ? "Actualizando…"
@@ -267,13 +282,20 @@ export function AttendanceView({ initialData }: { initialData: AttendancePageDat
 
           <button
             className="button button-primary checkin-button"
-            disabled={isSaving || isRefreshing || !canRegister || requiresPhoto}
+            disabled={isSaving || isLocating || isRefreshing || !canRegister || requiresPhoto}
             onClick={register}
             type="button"
           >
             <Icon name={action === "check-out" ? "logout" : "arrow-right"} size={19} />
             {buttonLabel}
           </button>
+
+          {canRegister && (
+            <p className="location-hint">
+              <Icon name="map-pin" size={14} />
+              Se validará tu ubicación al registrar. No cierres el permiso de GPS.
+            </p>
+          )}
 
           {notice && (
             <p className={`inline-notice notice-${notice.type}`} role="status">
