@@ -45,7 +45,8 @@ temporalmente para verificar la informacion antes de retirarlas fisicamente.
 
 - [x] `NEXT_PUBLIC_SUPABASE_URL`
 - [x] `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` o `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- [ ] `SUPABASE_SECRET_KEY`
+- [x] `SUPABASE_SECRET_KEY`
+- [ ] `CRON_SECRET`
 
 `SUPABASE_SECRET_KEY` solo debe usarse en servidor. Nunca debe tener prefijo `NEXT_PUBLIC_`.
 No es necesaria para marcar asistencia: las fotos se suben con la sesion autenticada.
@@ -66,8 +67,12 @@ Se necesita en la fase administrativa para crear usuarios con contraseña tempor
 - [x] Eliminar dependencia de tablas prototipo en repositorios.
 - [x] Ejecutar migracion de flujo `20260916100000_attendance_workflow.sql`.
 - [ ] Ejecutar migracion administrativa `20260916140000_employee_management.sql`.
-- [ ] Agregar auditoria de cambios administrativos.
-- [ ] Agregar politica de retencion de fotos.
+- [ ] Ejecutar migracion de jornadas `20260916170000_work_shift_management.sql`.
+- [ ] Ejecutar migracion de geolocalizacion `20260916190000_attendance_geolocation.sql`.
+- [ ] Ejecutar migracion de retencion de fotos `20260917090000_attendance_photo_retention.sql`.
+- [ ] Ejecutar migracion de auditoria `20260917120000_admin_audit_log.sql`.
+- [x] Agregar auditoria de cambios administrativos.
+- [x] Agregar politica de retencion de fotos.
 
 ## Auth y autorizacion
 
@@ -103,9 +108,13 @@ Se necesita en la fase administrativa para crear usuarios con contraseña tempor
 - [x] Migracion soporta jornadas configurables.
 - [x] Migracion soporta dias de jornada.
 - [x] Migracion soporta jornadas que cruzan medianoche usando timestamps.
-- [ ] UI admin para crear y editar jornadas.
+- [x] UI admin para crear y editar jornadas.
 - [x] UI admin para asignar jornada a empleado.
 - [x] Mostrar jornada actual del empleado desde el modelo nuevo.
+- [x] Configurar dias y horarios diferentes por jornada.
+- [x] Configurar tolerancias, reingreso y sesiones maximas.
+- [x] Activar y desactivar jornadas sin borrar historial.
+- [x] Advertir antes de desactivar jornadas con empleados asignados.
 - [ ] Respetar descanso no pagado si el cliente lo requiere.
 
 ## Asistencia
@@ -124,48 +133,49 @@ Se necesita en la fase administrativa para crear usuarios con contraseña tempor
 - [x] Evitar doble clic desde DB con constraints/RPC.
 - [x] Guardar observaciones separadas de entrada y salida.
 - [x] Detectar salidas anticipadas con tolerancia configurable.
-- [ ] Guardar latitud, longitud y distancia.
-- [ ] Validar ubicacion del lado servidor.
+- [x] Guardar latitud, longitud y distancia.
+- [x] Validar ubicacion del lado servidor.
 - [x] Usar timestamps completos para entrada y salida.
 - [x] Soportar correctamente jornadas nocturnas.
 - [x] Manejar fotos huerfanas si falla el insert.
 
 ## Ubicacion
 
-- [ ] Crear tabla/configuracion de ubicaciones autorizadas.
-- [ ] Capturar ubicacion en el navegador.
-- [ ] Manejar permiso de GPS denegado.
-- [ ] Manejar GPS apagado/no disponible.
-- [ ] Calcular distancia con Haversine.
-- [ ] Validar radio permitido en servidor o DB.
-- [ ] Guardar distancia de entrada y salida.
-- [ ] Mostrar error claro si esta fuera del radio.
+- [x] Crear tabla/configuracion de ubicaciones autorizadas.
+- [x] Capturar ubicacion en el navegador.
+- [x] Manejar permiso de GPS denegado.
+- [x] Manejar GPS apagado/no disponible.
+- [x] Calcular distancia con Haversine.
+- [x] Validar radio permitido en servidor o DB.
+- [x] Guardar distancia de entrada y salida.
+- [x] Mostrar error claro si esta fuera del radio.
 
 ## Fotografias
 
 - [x] Captura desde camara.
 - [x] Upload a Supabase Storage.
 - [x] Bucket privado en migracion.
-- [ ] Usar estructura final de paths por empleado/fecha/asistencia.
-- [ ] Generar signed URLs para admin.
-- [ ] No exponer fotos de otros empleados.
-- [ ] Eliminar archivos mayores a 20 dias.
-- [ ] Mantener registro historico aunque la foto se elimine.
-- [ ] Registrar `photo_deleted_at`.
+- [x] Usar estructura final de paths por empleado/fecha/asistencia.
+- [x] Generar signed URLs temporales para admin.
+- [x] No exponer fotos de otros empleados.
+- [x] Eliminar archivos mayores a 20 dias.
+- [x] Mantener registro historico aunque la foto se elimine.
+- [x] Registrar fecha de eliminacion por entrada y salida.
 
 ## Admin
 
-- [ ] Reducir navegacion a dos vistas principales: asistencia y admin.
+- [x] Reducir navegacion a dos vistas principales: asistencia y admin.
 - [x] Crear ruta `/admin`.
-- [ ] Consolidar dashboard, empleados, jornadas, asistencias y reportes.
+- [x] Consolidar accesos a empleados, jornadas y reportes desde admin.
 - [x] Ver empleados activos/inactivos/vacaciones/permiso.
-- [ ] Ver asistencia del dia.
-- [ ] Ver fotos vigentes.
-- [ ] Ver horas trabajadas por semana.
-- [ ] Ver historial por empleado.
+- [x] Ver asistencia del dia.
+- [x] Ver fotos vigentes con enlaces temporales.
+- [x] Ver horas trabajadas por semana.
+- [x] Ver historial por empleado.
 - [x] Editar estado laboral.
-- [ ] Administrar jornadas.
+- [x] Administrar jornadas.
 - [x] Crear usuarios con acceso temporal.
+- [x] Consultar historial inmutable de cambios administrativos.
 
 ## Vista empleado
 
@@ -182,11 +192,17 @@ Se necesita en la fase administrativa para crear usuarios con contraseña tempor
 
 - [x] Vista de reportes prototipo.
 - [x] Vista SQL para total semanal.
-- [ ] Conectar reportes al modelo nuevo.
-- [ ] Filtro por semana.
-- [ ] Filtro por empleado.
-- [ ] Filtro por departamento.
-- [ ] Exportacion futura si el cliente la pide.
+- [x] Conectar reportes al modelo nuevo.
+- [x] Filtro por rango semanal o personalizado.
+- [x] Filtro por empleado.
+- [x] Filtro por departamento.
+- [x] Filtro por jornada.
+- [x] Filtro por estado de asistencia.
+- [x] Rangos rapidos semanal, semana anterior y mensual.
+- [x] Desglose semanal de lunes a domingo por empleado.
+- [x] Historial paginado sin corte silencioso de 1,000 registros.
+- [x] Observaciones, ubicacion y estado de evidencia en el historial.
+- [x] Exportacion CSV.
 
 ## Seguridad
 
