@@ -22,7 +22,7 @@ export async function PATCH(
     const admin = await requireApiAdmin();
     const { id } = await params;
     const body = (await request.json()) as UpdateEmployeeInput;
-    const updated = await updateEmployee(id, body, admin.employeeId);
+    const updated = await updateEmployee(id, body, admin);
 
     return NextResponse.json({ ...updated, employees: await getEmployees() }, {
       headers: { "Cache-Control": "private, no-store" },

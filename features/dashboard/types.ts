@@ -23,6 +23,7 @@ export type RecentAttendanceItem = {
 export type DashboardData = {
   stats: DashboardStat[];
   weeklyPresence: number[];
+  weeklyPresenceAverage: number;
   recentAttendance: RecentAttendanceItem[];
   formattedDate: string;
 };

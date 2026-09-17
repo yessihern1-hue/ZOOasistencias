@@ -3,6 +3,7 @@ import "server-only";
 import { createSupabaseServerClient } from "@/server/supabase/client";
 
 const BUCKET_NAME = "attendance-photos";
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 type AttendancePhotoType =
   | "check-in"
@@ -27,6 +28,10 @@ function base64ToBuffer(photo: string) {
     "base64"
   );
 
+  if (!buffer.length || buffer.length > MAX_PHOTO_BYTES) {
+    throw new Error("La fotografía debe pesar menos de 5 MB.");
+  }
+
   let extension = "jpg";
 
   if (mimeType === "image/png") {
@@ -45,8 +50,9 @@ function base64ToBuffer(photo: string) {
 }
 
 export async function uploadAttendancePhoto(
-  userId: string,
+  employeeId: string,
   dateKey: string,
+  sessionId: string,
   type: AttendancePhotoType,
   photo: string
 ): Promise<string> {
@@ -56,11 +62,8 @@ export async function uploadAttendancePhoto(
     extension,
   } = base64ToBuffer(photo);
 
-  const fileName =
-    `${type}-${Date.now()}.${extension}`;
-
-  const path =
-    `${userId}/${dateKey}/${fileName}`;
+  const [year, month] = dateKey.split("-");
+  const path = `${employeeId}/${year}/${month}/${sessionId}/${type}.${extension}`;
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.storage
@@ -88,4 +91,36 @@ export async function deleteAttendancePhoto(path: string): Promise<void> {
   if (error) {
     throw new Error(`No se pudo eliminar la fotografía: ${error.message}`);
   }
+}
+
+export async function getAttendancePhotoUrls(sessionId: string) {
+  const supabase = await createSupabaseServerClient();
+  const { data: session, error: sessionError } = await supabase
+    .from("attendance_sessions")
+    .select("check_in_photo_path, check_out_photo_path, check_in_photo_deleted_at, check_out_photo_deleted_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (sessionError) throw new Error(`No se pudo consultar la evidencia: ${sessionError.message}`);
+  if (!session) throw new Error("La sesión de asistencia no existe.");
+
+  async function sign(path: string | null) {
+    if (!path) return null;
+    const { data, error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .createSignedUrl(path, 300);
+    if (error) throw new Error(`No se pudo abrir la fotografía: ${error.message}`);
+    return data.signedUrl;
+  }
+
+  const [checkInUrl, checkOutUrl] = await Promise.all([
+    sign(session.check_in_photo_path),
+    sign(session.check_out_photo_path),
+  ]);
+  return {
+    checkInUrl,
+    checkOutUrl,
+    checkInDeletedAt: session.check_in_photo_deleted_at,
+    checkOutDeletedAt: session.check_out_photo_deleted_at,
+  };
 }

@@ -28,6 +28,7 @@ export type AvatarTone =
 
 export type AttendanceRecord = {
   id: string;
+  workDate: string;
   employeeId: string;
   authUserId: string | null;
   employeeName: string;
@@ -38,6 +39,8 @@ export type AttendanceRecord = {
   checkOut: string | null;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
+  checkInPhotoDeletedAt: string | null;
+  checkOutPhotoDeletedAt: string | null;
   status: AttendanceStatus;
   sessionSequence: number;
   sessionStatus: AttendanceSessionStatus;
@@ -46,6 +49,16 @@ export type AttendanceRecord = {
   departureStatus: AttendanceDepartureStatus | null;
   checkInObservation: string | null;
   checkOutObservation: string | null;
+  checkInLocationName: string | null;
+  checkOutLocationName: string | null;
+  checkInDistanceMeters: number | null;
+  checkOutDistanceMeters: number | null;
+};
+
+export type AttendanceCoordinates = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
 };
 
 export type AttendanceRegistrationState = {

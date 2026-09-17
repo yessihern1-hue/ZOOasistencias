@@ -7,6 +7,8 @@ import type {
   EmployeeStatus,
   UpdateEmployeeInput,
 } from "@/features/employees/types";
+import type { SessionUser } from "@/features/auth/types";
+import { recordAdminAuditSafely } from "@/server/audit/admin-audit.service";
 import { getDateKey } from "@/server/shared/date";
 import { createSupabaseAdminClient } from "@/server/supabase/admin";
 
@@ -224,7 +226,7 @@ export async function getEmployees() {
   return employeeRepository.list();
 }
 
-export async function createEmployee(input: CreateEmployeeInput) {
+export async function createEmployee(input: CreateEmployeeInput, actor: SessionUser) {
   const values = normalizeCreateInput(input);
   await assertActiveShift(values.shiftId);
   const temporaryPassword = generateTemporaryPassword();
@@ -277,20 +279,37 @@ export async function createEmployee(input: CreateEmployeeInput) {
     throw error;
   }
 
+  await recordAdminAuditSafely(actor, {
+    action: "employee.created",
+    entityType: "employee",
+    entityId: employee.id,
+    entityLabel: values.name,
+    afterData: {
+      name: values.name,
+      email: values.email,
+      role: values.role,
+      employmentStatus: "active",
+      department: values.department || null,
+      position: values.position || null,
+      shiftId: values.shiftId,
+      mustChangePassword: true,
+    },
+  });
+
   return { employeeId: employee.id, temporaryPassword };
 }
 
 export async function updateEmployee(
   employeeId: string,
   input: UpdateEmployeeInput,
-  currentAdminEmployeeId: string
+  actor: SessionUser
 ) {
   const values = normalizeUpdateInput(input);
   await assertActiveShift(values.shiftId);
   const admin = createSupabaseAdminClient();
   const { data: current, error: currentError } = await admin
     .from("employees")
-    .select("id, auth_user_id, role, employment_status")
+    .select("id, auth_user_id, full_name, email, role, employment_status, department, position, termination_date, inactive_reason")
     .eq("id", employeeId)
     .maybeSingle();
 
@@ -298,7 +317,7 @@ export async function updateEmployee(
   if (!current) throw new EmployeeInputError("El colaborador no existe.");
 
   if (
-    employeeId === currentAdminEmployeeId &&
+    employeeId === actor.employeeId &&
     (values.role !== "admin" || values.status === "inactive")
   ) {
     throw new EmployeeConflictError("No puedes quitar tu propio acceso administrativo.");
@@ -338,7 +357,7 @@ export async function updateEmployee(
 
   await setEmployeeAbsence(
     employeeId,
-    currentAdminEmployeeId,
+    actor.employeeId,
     values.status,
     values.absenceStart,
     values.absenceEnd,
@@ -346,19 +365,48 @@ export async function updateEmployee(
   );
   await replaceShiftAssignment(employeeId, values.shiftId);
 
+  let warning: string | undefined;
   if (current.auth_user_id) {
     const { error: authError } = await admin.auth.admin.updateUserById(current.auth_user_id, {
       user_metadata: { full_name: values.name },
       app_metadata: { role: values.role },
       ban_duration: employmentStatus === "inactive" ? "876000h" : "none",
     });
-    return {
-      employeeId,
-      warning: authError
-        ? "Los datos se guardaron, pero la cuenta de Supabase no pudo sincronizarse."
-        : undefined,
-    };
+    warning = authError
+      ? "Los datos se guardaron, pero la cuenta de Supabase no pudo sincronizarse."
+      : undefined;
   }
 
-  return { employeeId };
+  await recordAdminAuditSafely(actor, {
+    action: "employee.updated",
+    entityType: "employee",
+    entityId: employeeId,
+    entityLabel: values.name,
+    beforeData: {
+      name: current.full_name,
+      email: current.email,
+      role: current.role,
+      employmentStatus: current.employment_status,
+      department: current.department,
+      position: current.position,
+      terminationDate: current.termination_date,
+      inactiveReason: current.inactive_reason,
+    },
+    afterData: {
+      name: values.name,
+      email: current.email,
+      role: values.role,
+      status: values.status,
+      employmentStatus,
+      department: values.department || null,
+      position: values.position || null,
+      shiftId: values.shiftId,
+      absenceStart: values.absenceStart ?? null,
+      absenceEnd: values.absenceEnd ?? null,
+      reason: values.reason || null,
+    },
+    metadata: warning ? { warning } : {},
+  });
+
+  return { employeeId, warning };
 }

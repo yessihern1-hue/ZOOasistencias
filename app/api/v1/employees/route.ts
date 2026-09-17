@@ -40,9 +40,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireApiAdmin();
+    const admin = await requireApiAdmin();
     const body = (await request.json()) as CreateEmployeeInput;
-    const created = await createEmployee(body);
+    const created = await createEmployee(body, admin);
     return NextResponse.json(
       { ...created, employees: await getEmployees() },
       { headers: { "Cache-Control": "private, no-store" }, status: 201 }
