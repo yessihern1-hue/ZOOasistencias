@@ -129,6 +129,34 @@ export function DashboardView({
         ))}
       </section>
 
+      <section aria-label="Herramientas administrativas" className="admin-tools-grid">
+        <Link className="panel admin-tool-card" href="/colaboradores">
+          <span className="stat-icon stat-blue"><Icon name="users" size={19} /></span>
+          <span><strong>Colaboradores</strong><small>Cuentas, roles, estados y asignaciones</small></span>
+          <Icon name="arrow-right" size={17} />
+        </Link>
+        <Link className="panel admin-tool-card" href="/jornadas">
+          <span className="stat-icon stat-amber"><Icon name="calendar" size={19} /></span>
+          <span><strong>Jornadas</strong><small>Horarios, días y tolerancias</small></span>
+          <Icon name="arrow-right" size={17} />
+        </Link>
+        <Link className="panel admin-tool-card" href="/reportes">
+          <span className="stat-icon stat-green"><Icon name="document" size={19} /></span>
+          <span><strong>Reportes</strong><small>Historial, horas y fotografías</small></span>
+          <Icon name="arrow-right" size={17} />
+        </Link>
+        <Link className="panel admin-tool-card" href="/ubicaciones">
+          <span className="stat-icon stat-blue"><Icon name="map-pin" size={19} /></span>
+          <span><strong>Ubicaciones</strong><small>Sedes autorizadas y radios permitidos</small></span>
+          <Icon name="arrow-right" size={17} />
+        </Link>
+        <Link className="panel admin-tool-card" href="/auditoria">
+          <span className="stat-icon stat-green"><Icon name="shield" size={19} /></span>
+          <span><strong>Auditoría</strong><small>Historial de cambios administrativos</small></span>
+          <Icon name="arrow-right" size={17} />
+        </Link>
+      </section>
+
       <section className="dashboard-grid">
         <article className="panel attendance-cta">
           <div className="attendance-cta-copy">
@@ -188,7 +216,7 @@ export function DashboardView({
             </div>
 
             <span className="percentage-pill">
-              89% promedio
+              {data.weeklyPresenceAverage}% promedio
             </span>
           </div>
 
@@ -240,7 +268,7 @@ export function DashboardView({
 
           <Link
             className="text-link"
-            href="/asistencia"
+            href="/reportes"
           >
             Ver todos
 

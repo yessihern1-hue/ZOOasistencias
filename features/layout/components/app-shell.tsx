@@ -10,10 +10,8 @@ import { Brand } from "@/features/shared/components/brand";
 import { Icon, type IconName } from "@/features/shared/components/icon";
 
 const adminNavigation: Array<{ href: string; label: string; icon: IconName }> = [
-  { href: "/admin", label: "Resumen", icon: "dashboard" },
+  { href: "/admin", label: "Panel administrativo", icon: "dashboard" },
   { href: "/asistencia", label: "Tomar asistencia", icon: "clock" },
-  { href: "/colaboradores", label: "Colaboradores", icon: "users" },
-  { href: "/reportes", label: "Reportes", icon: "document" },
 ];
 
 const employeeNavigation: typeof adminNavigation = [
@@ -61,7 +59,9 @@ export function AppShell({ children, user }: { children: ReactNode; user: Sessio
         <nav aria-label="Navegación principal" className="sidebar-nav">
           <p className="nav-label">MENÚ PRINCIPAL</p>
           {navigation.map((item) => {
-            const active = pathname === item.href;
+            const active = item.href === "/admin"
+              ? pathname !== "/asistencia"
+              : pathname === item.href;
             return (
               <Link
                 aria-current={active ? "page" : undefined}

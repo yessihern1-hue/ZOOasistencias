@@ -1,8 +1,11 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import type { SessionUser } from "@/features/auth/types";
 import type {
   AttendanceAction,
+  AttendanceCoordinates,
   AttendancePageData,
   AttendanceRecord,
   AttendanceSummary,
@@ -99,6 +102,9 @@ function extractDatabaseMessage(error: unknown): string {
     "Se alcanzo el maximo de sesiones permitidas para hoy.",
     "Todavia no se puede registrar entrada para esta jornada.",
     "No hay una entrada abierta para cerrar.",
+    "La ubicacion recibida no es valida.",
+    "No hay una ubicacion activa configurada. Contacta al administrador.",
+    "Estas fuera del area permitida para registrar asistencia.",
   ];
 
   return (
@@ -141,6 +147,7 @@ export async function getAttendancePageData(
 export async function registerAttendance(
   user: SessionUser,
   action: AttendanceAction,
+  coordinates: AttendanceCoordinates,
   photo?: string | null,
   observation?: string | null
 ): Promise<{ record: AttendanceRecord; data: AttendancePageData; message: string }> {
@@ -152,20 +159,53 @@ export async function registerAttendance(
     );
   }
 
-  const photoPath = await uploadAttendancePhoto(
-    user.id,
-    getDateKey(),
-    action,
-    photo
-  );
+  if (
+    !Number.isFinite(coordinates?.latitude) ||
+    coordinates.latitude < -90 ||
+    coordinates.latitude > 90 ||
+    !Number.isFinite(coordinates?.longitude) ||
+    coordinates.longitude < -180 ||
+    coordinates.longitude > 180 ||
+    !Number.isFinite(coordinates?.accuracy) ||
+    coordinates.accuracy < 0 ||
+    coordinates.accuracy > 10000
+  ) {
+    throw new AttendanceDomainError("La ubicación recibida no es válida.");
+  }
+
+  const employeeId = await attendanceRepository.findEmployeeIdByAuthUser(user.id);
+  if (!employeeId) throw new AttendanceDomainError("El empleado no está activo.");
+
+  const sessionId = action === "check-in"
+    ? randomUUID()
+    : await attendanceRepository.findOpenSessionId(employeeId);
+  if (!sessionId) {
+    throw new AttendanceDomainError("No hay una entrada abierta para cerrar.");
+  }
+
+  let photoPath: string;
+  try {
+    photoPath = await uploadAttendancePhoto(
+      employeeId,
+      getDateKey(),
+      sessionId,
+      action,
+      photo
+    );
+  } catch (error) {
+    const message = error instanceof Error && error.message.includes("5 MB")
+      ? "La fotografía debe pesar menos de 5 MB."
+      : "No se pudo guardar la fotografía. Intenta nuevamente.";
+    throw new AttendanceDomainError(message);
+  }
 
   let record: AttendanceRecord;
 
   try {
     record =
       action === "check-in"
-        ? await attendanceRepository.clockIn(photoPath, observation ?? null)
-        : await attendanceRepository.clockOut(photoPath, observation ?? null);
+        ? await attendanceRepository.clockIn(sessionId, photoPath, coordinates, observation ?? null)
+        : await attendanceRepository.clockOut(photoPath, coordinates, observation ?? null);
   } catch (error) {
     try {
       await deleteAttendancePhoto(photoPath);

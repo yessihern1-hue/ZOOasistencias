@@ -41,6 +41,8 @@ type AttendanceSessionRow = {
   check_out_at: string | null;
   check_in_photo_path: string | null;
   check_out_photo_path: string | null;
+  check_in_photo_deleted_at: string | null;
+  check_out_photo_deleted_at: string | null;
   arrival_status: "on_time" | "late";
   session_status: AttendanceSessionStatus;
   worked_minutes: number | null;
@@ -48,6 +50,10 @@ type AttendanceSessionRow = {
   departure_status: "on_time" | "early" | null;
   check_in_observation: string | null;
   check_out_observation: string | null;
+  check_in_distance_meters: number | null;
+  check_out_distance_meters: number | null;
+  check_in_location: { name: string } | { name: string }[] | null;
+  check_out_location: { name: string } | { name: string }[] | null;
   employees: EmployeeRelation | EmployeeRelation[] | null;
   work_shifts: WorkShiftRelation | WorkShiftRelation[] | null;
 };
@@ -77,6 +83,8 @@ const attendanceSelect = `
   check_out_at,
   check_in_photo_path,
   check_out_photo_path,
+  check_in_photo_deleted_at,
+  check_out_photo_deleted_at,
   arrival_status,
   session_status,
   worked_minutes,
@@ -84,6 +92,10 @@ const attendanceSelect = `
   departure_status,
   check_in_observation,
   check_out_observation,
+  check_in_distance_meters,
+  check_out_distance_meters,
+  check_in_location:attendance_locations!attendance_sessions_check_in_location_id_fkey (name),
+  check_out_location:attendance_locations!attendance_sessions_check_out_location_id_fkey (name),
   employees!attendance_sessions_employee_id_fkey (
     id,
     auth_user_id,
@@ -156,9 +168,12 @@ function mapAttendanceRow(row: AttendanceSessionRow): AttendanceRecord {
   const shift = getFirstRelation(row.work_shifts);
   const employeeName = employee?.full_name ?? "Empleado";
   const timeZone = shift?.timezone ?? "America/Guatemala";
+  const checkInLocation = getFirstRelation(row.check_in_location);
+  const checkOutLocation = getFirstRelation(row.check_out_location);
 
   return {
     id: row.id,
+    workDate: row.work_date,
     employeeId: row.employee_id,
     authUserId: employee?.auth_user_id ?? null,
     employeeName,
@@ -169,6 +184,8 @@ function mapAttendanceRow(row: AttendanceSessionRow): AttendanceRecord {
     checkOut: formatTime(row.check_out_at, timeZone),
     checkInPhoto: row.check_in_photo_path,
     checkOutPhoto: row.check_out_photo_path,
+    checkInPhotoDeletedAt: row.check_in_photo_deleted_at,
+    checkOutPhotoDeletedAt: row.check_out_photo_deleted_at,
     status: row.arrival_status === "late" ? "late" : "present",
     sessionSequence: row.session_sequence,
     sessionStatus: row.session_status,
@@ -177,6 +194,10 @@ function mapAttendanceRow(row: AttendanceSessionRow): AttendanceRecord {
     departureStatus: row.departure_status,
     checkInObservation: row.check_in_observation,
     checkOutObservation: row.check_out_observation,
+    checkInLocationName: checkInLocation?.name ?? null,
+    checkOutLocationName: checkOutLocation?.name ?? null,
+    checkInDistanceMeters: row.check_in_distance_meters,
+    checkOutDistanceMeters: row.check_out_distance_meters,
   };
 }
 
@@ -185,6 +206,36 @@ function throwRepositoryError(context: string, message: string): never {
 }
 
 export const attendanceRepository = {
+  async findEmployeeIdByAuthUser(authUserId: string): Promise<string | null> {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("auth_user_id", authUserId)
+      .eq("employment_status", "active")
+      .maybeSingle();
+
+    if (error) {
+      throwRepositoryError("Error al consultar el empleado autenticado", error.message);
+    }
+    return data?.id ?? null;
+  },
+
+  async findOpenSessionId(employeeId: string): Promise<string | null> {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("attendance_sessions")
+      .select("id")
+      .eq("employee_id", employeeId)
+      .eq("session_status", "open")
+      .order("check_in_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throwRepositoryError("Error al consultar la sesión abierta", error.message);
+    return data?.id ?? null;
+  },
+
   async listByDate(dateKey: string): Promise<AttendanceRecord[]> {
     const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
@@ -201,6 +252,21 @@ export const attendanceRepository = {
     return ((data ?? []) as unknown as AttendanceSessionRow[]).map(
       mapAttendanceRow
     );
+  },
+
+  async listByRange(fromDate: string, toDate: string): Promise<AttendanceRecord[]> {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase
+      .from("attendance_sessions")
+      .select(attendanceSelect)
+      .gte("work_date", fromDate)
+      .lte("work_date", toDate)
+      .neq("session_status", "cancelled")
+      .order("check_in_at", { ascending: false })
+      .limit(1000);
+
+    if (error) throwRepositoryError("Error al consultar el historial", error.message);
+    return ((data ?? []) as unknown as AttendanceSessionRow[]).map(mapAttendanceRow);
   },
 
   async findActiveShiftByAuthUser(
@@ -271,12 +337,21 @@ export const attendanceRepository = {
     };
   },
 
-  async clockIn(photoPath: string, observation: string | null = null) {
-    return this.registerWithRpc("clock_in", photoPath, observation);
+  async clockIn(
+    sessionId: string,
+    photoPath: string,
+    coordinates: { latitude: number; longitude: number; accuracy: number },
+    observation: string | null = null
+  ) {
+    return this.registerWithRpc("clock_in", photoPath, coordinates, observation, sessionId);
   },
 
-  async clockOut(photoPath: string, observation: string | null = null) {
-    return this.registerWithRpc("clock_out", photoPath, observation);
+  async clockOut(
+    photoPath: string,
+    coordinates: { latitude: number; longitude: number; accuracy: number },
+    observation: string | null = null
+  ) {
+    return this.registerWithRpc("clock_out", photoPath, coordinates, observation);
   },
 
   async getMyRegistrationState(): Promise<AttendanceRegistrationState> {
@@ -320,28 +395,38 @@ export const attendanceRepository = {
   async registerWithRpc(
     functionName: "clock_in" | "clock_out",
     photoPath: string,
-    observation: string | null
+    coordinates: { latitude: number; longitude: number; accuracy: number },
+    observation: string | null,
+    sessionId?: string
   ): Promise<AttendanceRecord> {
     const supabase = await createSupabaseServerClient();
-    const { data: rpcData, error: rpcError } = await supabase.rpc(functionName, {
+    const parameters: Record<string, string | number | null> = {
       p_photo_path: photoPath,
       p_observation: observation,
-    });
+      p_latitude: coordinates.latitude,
+      p_longitude: coordinates.longitude,
+      p_accuracy_meters: coordinates.accuracy,
+    };
+    if (sessionId) parameters.p_session_id = sessionId;
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      functionName,
+      parameters
+    );
 
     if (rpcError) {
       throwRepositoryError("No se pudo registrar la asistencia", rpcError.message);
     }
 
     const result = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-    const sessionId = result?.id;
-    if (!sessionId) {
+    const registeredSessionId = result?.id;
+    if (!registeredSessionId) {
       throw new Error("Supabase no devolvió la sesión de asistencia creada.");
     }
 
     const { data, error } = await supabase
       .from("attendance_sessions")
       .select(attendanceSelect)
-      .eq("id", sessionId)
+      .eq("id", registeredSessionId)
       .single();
 
     if (error) {

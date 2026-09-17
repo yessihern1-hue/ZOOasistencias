@@ -13,6 +13,7 @@ export type IconName =
   | "eye-off"
   | "fingerprint"
   | "logout"
+  | "map-pin"
   | "menu"
   | "search"
   | "shield"
@@ -87,6 +88,12 @@ export function Icon({ name, size = 20, ...props }: IconProps) {
       <>
         <path d="M10 17l5-5-5-5M15 12H3" />
         <path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
+      </>
+    ),
+    "map-pin": (
+      <>
+        <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+        <circle cx="12" cy="10" r="2.5" />
       </>
     ),
     menu: <path d="M4 6h16M4 12h16M4 18h16" />,

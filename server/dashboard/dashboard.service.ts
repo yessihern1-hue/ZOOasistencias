@@ -4,13 +4,16 @@ import type { DashboardData } from "@/features/dashboard/types";
 
 import { attendanceRepository } from "@/server/attendance/attendance.repository";
 import { employeeRepository } from "@/server/employees/employee.repository";
-import { formatLongDate, getDateKey } from "@/server/shared/date";
+import { addDays, formatLongDate, getCurrentWeekRange, getDateKey } from "@/server/shared/date";
 
 export async function getDashboardData(): Promise<DashboardData> {
   const dateKey = getDateKey();
+  const week = getCurrentWeekRange();
+  const weekdays = Array.from({ length: 5 }, (_, index) => addDays(week.from, index));
 
-  const [records, employees] = await Promise.all([
+  const [records, weeklyRecords, employees] = await Promise.all([
     attendanceRepository.listByDate(dateKey),
+    attendanceRepository.listByRange(week.from, addDays(week.from, 4)),
     employeeRepository.list(),
   ]);
   const latestByEmployee = new Map<string, (typeof records)[number]>();
@@ -19,16 +22,33 @@ export async function getDashboardData(): Promise<DashboardData> {
       latestByEmployee.set(record.employeeId, record);
     }
   }
-  const attendedEmployeeIds = new Set(records.map((record) => record.employeeId));
-  const lateEmployeeIds = new Set(
-    records.filter((record) => record.status === "late").map((record) => record.employeeId)
-  );
   const activeEmployees = employees.filter((employee) => employee.status === "active");
+  const activeEmployeeIds = new Set(activeEmployees.map((employee) => employee.id));
+  const attendedEmployeeIds = new Set(
+    records.filter((record) => activeEmployeeIds.has(record.employeeId)).map((record) => record.employeeId)
+  );
+  const lateEmployeeIds = new Set(
+    records
+      .filter((record) => activeEmployeeIds.has(record.employeeId) && record.status === "late")
+      .map((record) => record.employeeId)
+  );
   const absentEmployees = activeEmployees.filter(
     (employee) => !attendedEmployeeIds.has(employee.id)
   ).length;
   const attendanceRate = activeEmployees.length
     ? Math.round((attendedEmployeeIds.size / activeEmployees.length) * 100)
+    : 0;
+  const weeklyPresence = weekdays.map((day) => {
+    const present = new Set(
+      weeklyRecords
+        .filter((record) => record.workDate === day && activeEmployeeIds.has(record.employeeId))
+        .map((record) => record.employeeId)
+    ).size;
+    return activeEmployees.length ? Math.round((present / activeEmployees.length) * 100) : 0;
+  });
+  const elapsedPresence = weeklyPresence.filter((_, index) => weekdays[index] <= dateKey);
+  const weeklyPresenceAverage = elapsedPresence.length
+    ? Math.round(elapsedPresence.reduce((total, value) => total + value, 0) / elapsedPresence.length)
     : 0;
 
   return {
@@ -65,7 +85,8 @@ export async function getDashboardData(): Promise<DashboardData> {
       },
     ],
 
-    weeklyPresence: [84, 91, 88, 95, 89],
+    weeklyPresence,
+    weeklyPresenceAverage,
 
     recentAttendance: [...latestByEmployee.values()]
       .filter((record) => record.checkIn)

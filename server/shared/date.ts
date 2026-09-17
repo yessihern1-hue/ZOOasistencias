@@ -35,3 +35,17 @@ export function formatLongDate(date = new Date()) {
 
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
+
+export function addDays(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function getCurrentWeekRange(date = new Date()) {
+  const dateKey = getDateKey(date);
+  const dayOfWeek = new Date(`${dateKey}T12:00:00Z`).getUTCDay();
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const from = addDays(dateKey, -daysSinceMonday);
+  return { from, to: addDays(from, 6) };
+}

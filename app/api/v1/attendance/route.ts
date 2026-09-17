@@ -65,6 +65,7 @@ export async function POST(request: Request) {
       action?: unknown;
       photo?: unknown;
       observation?: unknown;
+      location?: unknown;
     };
 
     if (
@@ -75,6 +76,26 @@ export async function POST(request: Request) {
         {
           error: "La acción de asistencia no es válida.",
         },
+        { status: 400 }
+      );
+    }
+
+    const location = body.location as {
+      latitude?: unknown;
+      longitude?: unknown;
+      accuracy?: unknown;
+    } | null;
+    if (
+      !location ||
+      typeof location.latitude !== "number" ||
+      typeof location.longitude !== "number" ||
+      typeof location.accuracy !== "number" ||
+      !Number.isFinite(location.latitude) ||
+      !Number.isFinite(location.longitude) ||
+      !Number.isFinite(location.accuracy)
+    ) {
+      return NextResponse.json(
+        { error: "Debes compartir una ubicación válida para registrar asistencia." },
         { status: 400 }
       );
     }
@@ -106,6 +127,11 @@ export async function POST(request: Request) {
     const result = await registerAttendance(
       user,
       body.action,
+      {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+      },
       body.photo ?? null,
       typeof body.observation === "string"
         ? body.observation.trim() || null
